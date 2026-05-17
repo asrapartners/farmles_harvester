@@ -1,8 +1,15 @@
-#farmles_harvester
+# farmles_harvester
 
 `farmles_harvester` is a the crawler and markdown generation tool for farmer market website.
 
 It takes a user povided list of source URL's, runs them through a staged pipeline, and generates markdown files under a run folder.
+The core data we care about:
+- market name
+- location
+- opening days/hours
+- seasonality
+- vendors
+- vendor products/categories
 
 It does **not** own market identity, approved wiki content, Pull requests or SQL export. Those belong to `farmles_wiki` repo.
 
@@ -51,6 +58,11 @@ runs/2026-05-17_132400_initial-import/
 ```
 
 ## Pipeline Stages
+The script runs as a pipeline with each stage having a core responsibility. For each stage there is 
+- stage name
+- input artifact
+- output artifact
+
 ### 00 Normalize Source Leads
 Clean user provided URLs into normalized source lead records.
 
@@ -60,6 +72,8 @@ Check whether the normalized URL's are reachable and record final RTL, HTTP stat
 - input `00_normalized_links.jsonl`
 - output `01_validated_links.jsonl`
 
+Refer to [01_validate_links](./docs/pipeline/01_validate_links.md) for more details
+
 ### 02 Discover Links
 Fetch each validated source page and record links found in <a href="..."> tags.
 Only discover level-1 links and does not fetch the discovered links.
@@ -67,17 +81,21 @@ Only discover level-1 links and does not fetch the discovered links.
 - input `01_validated_links.jsonl`
 - output `02_discovered_links.jsonl`
 
+Refer to [02_discovered_links](./docs/pipeline/02_discovered_links.md) for more details
+
 ### 03 Score Candidate URLs
 Use deterministic ruls to score discoved URLs and select URLs worth converting to markdown. This stage is rule based and not AI driven.
 
 - input `02_discoverd_links.jsonl`
 - output `03_candidate_links.jsonl`
 
+Refer to [03_score_candidate_links](./docs/pipeline/03_candidate_links.md) for more details
+
 ## 04 Generate Markdown Pages
 Fech selected candidate URLs and convert them to markdown files. The output is under 'generated_wiki' and organized by lead_id which is a simple incrementer.
 
 - input `03_candidate_links.jsonl`
-- output `04_markdown_pages.jsonl`, `generated_wiki/`
+- output `04_markdown_pages.jsonl`, `generated_wiki/` for all the generated md files.
 
 ## Important Files
 Each run has a manifest.json that holds the run ledger.
