@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Generated runs
+runs/*
+!runs/.gitkeep
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
