@@ -3,7 +3,7 @@
 ## Purpose
 
 The orchestrator is the top level controller for one 'farmles_harvester' run of a pipeline. It calls each stage
-of the pipeline in order and records the result.
+of the pipeline in order with the input and "StagePaths" and records the result returned.
 
 It owns
 
