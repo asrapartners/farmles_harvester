@@ -2,6 +2,10 @@ import json
 
 import pytest
 
+from farmles_harvester.models.record_contracts import (
+    NORMALIZED_SOURCE_LEAD_REQUIRED,
+    require_fields,
+)
 from farmles_harvester.pipeline.jsonl import read_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import StageResult
@@ -132,3 +136,12 @@ class TestRunNormalizeSourceLeads:
         assert paths.output_path.exists()
         assert paths.summary_path.exists()
         assert paths.errors_path.exists()
+
+    def test_output_records_satisfy_contract(self, tmp_path):
+        seed = _make_seed(tmp_path, SEED_TEXT)
+        paths = _make_paths(tmp_path)
+        run_normalize_source_leads(seed, paths, RUN_ID)
+        records = read_jsonl(paths.output_path)
+        assert len(records) > 0
+        for record in records:
+            require_fields(record, NORMALIZED_SOURCE_LEAD_REQUIRED)

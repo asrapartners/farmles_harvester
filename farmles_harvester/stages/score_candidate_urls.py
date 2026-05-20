@@ -1,8 +1,14 @@
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 from farmles_harvester.constants import CandidateType, CandidateStatus, CandidateStrength
+from farmles_harvester.models.record_contracts import DISCOVERED_LINK_REQUIRED, missing_fields
+from farmles_harvester.pipeline.jsonl import read_jsonl, write_json, write_jsonl
+from farmles_harvester.pipeline.stage_paths import StagePaths
+from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 
 _POSITIVE_SIGNAL_GROUPS: list[tuple[frozenset[str], str, int]] = [
     (frozenset({"vendor", "vendors", "our-vendors"}), CandidateType.VENDOR_PAGE, 50),
@@ -112,4 +118,118 @@ def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -
         candidate_status=status,
         candidate_strength=strength,
         score_reasons=reasons,
+    )
+
+
+def run_score_candidate_urls(
+    input_path: Path,
+    stage_paths: StagePaths,
+    run_id: str,
+    config: dict | None = None,
+) -> StageResult:
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    input_records = read_jsonl(input_path)
+    output_records: list[dict] = []
+    error_records: list[dict] = []
+
+    selected_count = 0
+    rejected_count = 0
+    external_reference_count = 0
+    strong_count = 0
+    medium_count = 0
+    weak_count = 0
+
+    for record in input_records:
+        missing = missing_fields(record, DISCOVERED_LINK_REQUIRED)
+        if missing:
+            error_records.append({
+                "run_id": run_id,
+                "stage_name": "score_candidate_urls",
+                "source_lead_id": record.get("source_lead_id"),
+                "discovered_url": record.get("discovered_url"),
+                "error_type": "invalid_input_record",
+                "message": f"Missing required fields: {sorted(missing)}",
+                "retryable": False,
+                "created_at": started_at,
+            })
+            continue
+
+        link_record = LinkRecord(
+            discovered_url=record["discovered_url"],
+            link_text=record["link_text"],
+            is_internal=record["is_internal"],
+            follow_allowed=record["follow_allowed"],
+        )
+
+        result = score_discovered_link(link_record, config=config)
+        scored_at = datetime.now(timezone.utc).isoformat()
+
+        if result.candidate_status == CandidateStatus.SELECTED:
+            selected_count += 1
+        elif result.candidate_status == CandidateStatus.EXTERNAL_REFERENCE:
+            external_reference_count += 1
+        else:
+            rejected_count += 1
+
+        if result.candidate_strength == CandidateStrength.STRONG:
+            strong_count += 1
+        elif result.candidate_strength == CandidateStrength.MEDIUM:
+            medium_count += 1
+        else:
+            weak_count += 1
+
+        output_records.append({
+            "run_id": run_id,
+            "source_lead_id": record["source_lead_id"],
+            "source_url": record["source_url"],
+            "candidate_url": record["discovered_url"],
+            "link_text": record["link_text"],
+            "candidate_type": result.candidate_type,
+            "candidate_score": result.candidate_score,
+            "candidate_status": result.candidate_status,
+            "candidate_strength": result.candidate_strength,
+            "score_reasons": result.score_reasons,
+            "scored_at": scored_at,
+        })
+
+    write_jsonl(stage_paths.output_path, output_records)
+    write_jsonl(stage_paths.errors_path, error_records)
+
+    completed_at = datetime.now(timezone.utc).isoformat()
+
+    counts = {
+        "input_records": len(input_records),
+        "output_records": len(output_records),
+        "error_records": len(error_records),
+        "selected_count": selected_count,
+        "rejected_count": rejected_count,
+        "external_reference_count": external_reference_count,
+        "strong_candidate_count": strong_count,
+        "medium_candidate_count": medium_count,
+        "weak_candidate_count": weak_count,
+    }
+
+    summary = {
+        "stage_name": "score_candidate_urls",
+        "stage_number": "03",
+        "run_id": run_id,
+        **counts,
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
+    write_json(stage_paths.summary_path, summary)
+
+    return StageResult(
+        stage_id="03_score_candidate_urls",
+        stage_number="03",
+        stage_name="score_candidate_urls",
+        status=STAGE_STATUS_COMPLETED,
+        consumed_artifacts=[input_path.name],
+        produced_artifacts=[stage_paths.output_path.name],
+        summary_artifact=stage_paths.summary_path.name,
+        error_artifact=stage_paths.errors_path.name,
+        counts=counts,
+        started_at=started_at,
+        completed_at=completed_at,
     )

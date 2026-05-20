@@ -1,5 +1,10 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
+
+STAGE_STATUS_COMPLETED = "completed"
+STAGE_STATUS_FAILED = "failed"
+STAGE_STATUS_SKIPPED = "skipped"
 
 
 @dataclass
@@ -7,14 +12,19 @@ class StageResult:
     stage_id: str
     stage_number: str
     stage_name: str
-    status: str  # "completed" | "failed"
-    consumed_artifacts: list[str]
-    produced_artifacts: list[str]
-    summary_artifact: str
-    error_artifact: str
-    counts: dict
-    started_at: str
-    completed_at: str
+    status: str
 
-    def to_dict(self) -> dict:
+    consumed_artifacts: list[str] = field(default_factory=list)
+    produced_artifacts: list[str] = field(default_factory=list)
+
+    summary_artifact: str | None = None
+    error_artifact: str | None = None
+
+    counts: dict[str, Any] = field(default_factory=dict)
+    started_at: str | None = None
+    completed_at: str | None = None
+
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
