@@ -107,5 +107,18 @@ Each run has a manifest.json that holds the run ledger.
 - errors
 - execution log
 
+---
 
+## Quick Start (Sprint 0 — Tooling)
+
+Sprint 0 verifies that the core HTML tooling (BeautifulSoup, markdownify) and test infrastructure work locally. No pipeline logic is implemented yet.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
+```
+
+All tests run offline. No internet access is required.
 
