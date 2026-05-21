@@ -50,14 +50,14 @@ def parse_seed_lines(seed_text: str) -> list[SourceLead]:
 
 
 def run_normalize_source_leads(
-    seed_path: Path,
+    input_path: Path,
     stage_paths: StagePaths,
     run_id: str,
     config: dict | None = None,
 ) -> StageResult:
     started_at = datetime.now(timezone.utc).isoformat()
 
-    seed_text = seed_path.read_text(encoding="utf-8")
+    seed_text = input_path.read_text(encoding="utf-8")
     all_lines = seed_text.splitlines()
 
     blank_lines = sum(1 for l in all_lines if not l.strip())
@@ -134,7 +134,7 @@ def run_normalize_source_leads(
         stage_number="00",
         stage_name="normalize_source_leads",
         status="completed",
-        consumed_artifacts=[seed_path.name],
+        consumed_artifacts=[input_path.name],
         produced_artifacts=[stage_paths.output_path.name],
         summary_artifact=stage_paths.summary_path.name,
         error_artifact=stage_paths.errors_path.name,

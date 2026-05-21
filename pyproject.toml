@@ -17,6 +17,9 @@ dev = [
     "ruff",
 ]
 
+[project.scripts]
+farmles_harvester = "farmles_harvester.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["farmles_harvester*"]
 
