@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
 
@@ -78,6 +79,18 @@ def normalize_url(raw_url: str) -> NormalizedUrlResult:
         status="normalized",
         notes=notes,
     )
+
+
+def source_url_to_slug(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = parsed.path.strip("/")
+    combined = f"{host}/{path}" if path else host
+    slug = re.sub(r"[^a-z0-9]+", "-", combined)
+    slug = slug.strip("-")
+    return slug
 
 
 def is_internal_link(source_url: str, discovered_url: str) -> bool:

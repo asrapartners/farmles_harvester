@@ -39,6 +39,7 @@ CANDIDATE_URL_REQUIRED: frozenset[str] = frozenset({
 MARKDOWN_PAGE_REQUIRED: frozenset[str] = frozenset({
     "run_id",
     "source_lead_id",
+    "source_slug",
     "candidate_url",
     "candidate_type",
     "fetch_status",

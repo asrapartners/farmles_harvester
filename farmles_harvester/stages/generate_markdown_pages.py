@@ -12,6 +12,7 @@ from farmles_harvester.pipeline.jsonl import read_jsonl, write_json, write_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 from farmles_harvester.web.fetcher import FetchTimeoutError
+from farmles_harvester.web.url_utils import source_url_to_slug
 
 _HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 
@@ -104,9 +105,9 @@ def run_generate_markdown_pages(
     pages_failed = 0
     non_html_count = 0
     markdown_files_written = 0
-    lead_folders_seen: set[str] = set()
+    source_folders_seen: set[str] = set()
     used_filenames: dict[str, set[str]] = {}
-    lead_metadata_written: set[str] = set()
+    source_metadata_written: set[str] = set()
 
     for record in input_records:
         missing = missing_fields(record, CANDIDATE_URL_REQUIRED)
@@ -132,22 +133,21 @@ def run_generate_markdown_pages(
         candidate_url = record["candidate_url"]
         generated_at = datetime.now(timezone.utc).isoformat()
 
-        # Ensure lead folder exists and write lead_metadata.json once
-        lead_dir = wiki_dir / lead_id
-        lead_dir.mkdir(parents=True, exist_ok=True)
-        if lead_id not in lead_folders_seen:
-            lead_folders_seen.add(lead_id)
-        if lead_id not in lead_metadata_written:
-            lead_metadata_written.add(lead_id)
+        source_slug = source_url_to_slug(record["source_url"])
+        source_dir = wiki_dir / "sources" / source_slug
+        pages_dir = source_dir / "pages"
+        pages_dir.mkdir(parents=True, exist_ok=True)
+        if source_slug not in source_folders_seen:
+            source_folders_seen.add(source_slug)
+        if source_slug not in source_metadata_written:
+            source_metadata_written.add(source_slug)
             meta = {
-                "source_lead_id": lead_id,
-                "source_url": record.get("source_url"),
+                "source_slug": source_slug,
                 "input_url": None,
                 "normalized_url": None,
-                "final_url": None,
-                "generated_at": generated_at,
+                "final_url": record.get("source_url"),
             }
-            (lead_dir / "lead_metadata.json").write_text(
+            (source_dir / "source_metadata.json").write_text(
                 json.dumps(meta, indent=2), encoding="utf-8"
             )
 
@@ -157,6 +157,7 @@ def run_generate_markdown_pages(
             output_records.append({
                 "run_id": run_id,
                 "source_lead_id": lead_id,
+                "source_slug": source_slug,
                 "candidate_url": candidate_url,
                 "candidate_type": record["candidate_type"],
                 "candidate_score": record.get("candidate_score"),
@@ -184,6 +185,7 @@ def run_generate_markdown_pages(
             output_records.append({
                 "run_id": run_id,
                 "source_lead_id": lead_id,
+                "source_slug": source_slug,
                 "candidate_url": candidate_url,
                 "candidate_type": record["candidate_type"],
                 "candidate_score": record.get("candidate_score"),
@@ -213,6 +215,7 @@ def run_generate_markdown_pages(
             output_records.append({
                 "run_id": run_id,
                 "source_lead_id": lead_id,
+                "source_slug": source_slug,
                 "candidate_url": candidate_url,
                 "candidate_type": record["candidate_type"],
                 "candidate_score": record.get("candidate_score"),
@@ -227,18 +230,19 @@ def run_generate_markdown_pages(
             continue
 
         base_filename = candidate_type_to_filename(record["candidate_type"])
-        filename = _resolve_filename(used_filenames, lead_id, base_filename)
+        filename = _resolve_filename(used_filenames, source_slug, base_filename)
         markdown_text = html_to_markdown(response.text, candidate_url)
 
-        md_path = lead_dir / filename
+        md_path = pages_dir / filename
         md_path.write_text(markdown_text, encoding="utf-8")
         markdown_files_written += 1
         pages_fetched += 1
 
-        rel_path = f"generated_wiki/{lead_id}/{filename}"
+        rel_path = f"generated_wiki/sources/{source_slug}/pages/{filename}"
         output_records.append({
             "run_id": run_id,
             "source_lead_id": lead_id,
+            "source_slug": source_slug,
             "candidate_url": candidate_url,
             "candidate_type": record["candidate_type"],
             "candidate_score": record.get("candidate_score"),
@@ -264,7 +268,7 @@ def run_generate_markdown_pages(
         "pages_failed": pages_failed,
         "non_html_count": non_html_count,
         "markdown_files_written": markdown_files_written,
-        "lead_folders_created": len(lead_folders_seen),
+        "source_folders_created": len(source_folders_seen),
         "error_records": len(error_records),
     }
 

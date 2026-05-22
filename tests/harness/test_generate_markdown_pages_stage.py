@@ -13,6 +13,7 @@ from tests.helpers.fake_fetcher import FakeFetcher, FakeResponse
 
 RUN_ID = "2026-05-17_130000_test"
 SOURCE_URL = "https://apex.example/"
+SOURCE_SLUG = "apex-example"
 VENDORS_URL = f"{SOURCE_URL}vendors"
 VISIT_URL = f"{SOURCE_URL}visit"
 
@@ -24,6 +25,8 @@ VENDOR_HTML = """\
 </ul>
 </body></html>
 """
+
+_FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "source_lead_id", "timestamp", "content_hash"}
 
 
 def _candidate(url: str, candidate_type: str, lead_id: str = "lead_1",
@@ -82,32 +85,33 @@ class TestRunGenerateMarkdownPages:
         assert summary["selected_candidates"] == 1
         assert summary["skipped_candidates"] == 2
 
-    def test_writes_markdown_under_generated_wiki_lead_folder(self, tmp_path):
+    def test_writes_markdown_under_stable_source_slug_path(self, tmp_path):
         input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
         paths = _make_paths(tmp_path)
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
-        md_file = tmp_path / "generated_wiki" / "lead_1" / "vendors.md"
+        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md"
         assert md_file.exists()
 
-    def test_writes_lead_metadata_json(self, tmp_path):
+    def test_writes_stable_source_metadata_json(self, tmp_path):
         input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
         paths = _make_paths(tmp_path)
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
-        meta_path = tmp_path / "generated_wiki" / "lead_1" / "lead_metadata.json"
+        meta_path = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "source_metadata.json"
         assert meta_path.exists()
         meta = json.loads(meta_path.read_text())
-        assert meta["source_lead_id"] == "lead_1"
-        assert meta["source_url"] == SOURCE_URL
-        assert "generated_at" in meta
+        assert set(meta.keys()) == {"source_slug", "input_url", "normalized_url", "final_url"}
+        assert meta["source_slug"] == SOURCE_SLUG
+        assert meta["final_url"] == SOURCE_URL
+        assert not _FORBIDDEN_META_KEYS & set(meta.keys())
 
     def test_html_is_converted_to_markdown(self, tmp_path):
         input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
         paths = _make_paths(tmp_path)
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
-        md_file = tmp_path / "generated_wiki" / "lead_1" / "vendors.md"
+        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md"
         content = md_file.read_text()
         assert "Vendors" in content
         assert "Smith Farm - vegetables and eggs" in content
@@ -122,6 +126,15 @@ class TestRunGenerateMarkdownPages:
         assert len(records) > 0
         for record in records:
             require_fields(record, MARKDOWN_PAGE_REQUIRED)
+
+    def test_output_records_include_source_slug(self, tmp_path):
+        input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
+        records = read_jsonl(paths.output_path)
+        for record in records:
+            assert record["source_slug"] == SOURCE_SLUG
 
     def test_filename_collision_does_not_overwrite(self, tmp_path):
         records = [
@@ -138,9 +151,9 @@ class TestRunGenerateMarkdownPages:
                 content_type="text/html", text="<p>Vendors 2</p>"),
         })
         run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher)
-        lead_dir = tmp_path / "generated_wiki" / "lead_1"
-        assert (lead_dir / "vendors.md").exists()
-        assert (lead_dir / "vendors-2.md").exists()
+        pages_dir = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages"
+        assert (pages_dir / "vendors.md").exists()
+        assert (pages_dir / "vendors-2.md").exists()
 
     def test_non_html_response_writes_output_record_no_markdown_no_error(self, tmp_path):
         pdf_url = f"{SOURCE_URL}brochure.pdf"
@@ -216,8 +229,8 @@ class TestRunGenerateMarkdownPages:
         paths2 = StagePaths.for_stage(tmp_path / "run2", "04", "markdown_pages")
         run_generate_markdown_pages(input2, paths2, "run-id-2", fetcher=fetcher)
 
-        md1 = (tmp_path / "run1" / "generated_wiki" / "lead_1" / "vendors.md").read_text()
-        md2 = (tmp_path / "run2" / "generated_wiki" / "lead_1" / "vendors.md").read_text()
+        md1 = (tmp_path / "run1" / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md").read_text()
+        md2 = (tmp_path / "run2" / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md").read_text()
 
         assert md1 == md2
         assert "run-id-1" not in md1
