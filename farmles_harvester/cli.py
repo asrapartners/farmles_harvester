@@ -4,6 +4,7 @@ from pathlib import Path
 
 from farmles_harvester.orchestrator.exceptions import PipelineError
 from farmles_harvester.orchestrator.run_pipeline import run_pipeline
+from farmles_harvester.web.fetcher import HttpFetcher
 
 
 def main() -> None:
@@ -21,6 +22,7 @@ def main() -> None:
             seed_file=args.seed_file,
             tag=args.tag,
             runs_dir=args.runs_dir,
+            fetcher=HttpFetcher(),
         )
         print(f"Run completed: {run_dir}")
     except PipelineError as e:

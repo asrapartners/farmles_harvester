@@ -90,6 +90,26 @@ class TestComputeContentHash:
         assert compute_content_hash("hello") != compute_content_hash("world")
 
 
+class TestStability:
+    HTML = "<h1>Vendors</h1><ul><li>Smith Farm - vegetables and eggs</li></ul>"
+    URL = "https://apex.example/vendors"
+
+    def test_html_to_markdown_is_deterministic(self):
+        assert html_to_markdown(self.HTML, self.URL) == html_to_markdown(self.HTML, self.URL)
+
+    def test_markdown_does_not_contain_volatile_metadata(self):
+        result = html_to_markdown(self.HTML, self.URL)
+        assert "generated_at" not in result
+        assert "Generated at" not in result
+        assert "run_id" not in result
+        assert "Run ID" not in result
+        assert f"Source: {self.URL}" in result
+
+    def test_normalize_markdown_is_deterministic(self):
+        raw = "# Title   \n\n\n\nSome text   \n\n"
+        assert normalize_markdown(raw) == normalize_markdown(raw)
+
+
 class TestDirtyHtmlEdgeCases:
     def test_malformed_unclosed_html_does_not_crash(self):
         html = "<h1>Apex Market<p>Hours: Saturdays 8 AM"

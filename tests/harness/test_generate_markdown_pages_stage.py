@@ -204,6 +204,27 @@ class TestRunGenerateMarkdownPages:
         assert wiki_dir.exists()
         assert wiki_dir.is_dir()
 
+    def test_markdown_files_are_stable_across_repeated_runs(self, tmp_path):
+        records = [_candidate(VENDORS_URL, "vendor_page")]
+        fetcher = _html_fetcher(**{VENDORS_URL: VENDOR_HTML})
+
+        input1 = _make_input(tmp_path / "run1", records)
+        paths1 = StagePaths.for_stage(tmp_path / "run1", "04", "markdown_pages")
+        run_generate_markdown_pages(input1, paths1, "run-id-1", fetcher=fetcher)
+
+        input2 = _make_input(tmp_path / "run2", records)
+        paths2 = StagePaths.for_stage(tmp_path / "run2", "04", "markdown_pages")
+        run_generate_markdown_pages(input2, paths2, "run-id-2", fetcher=fetcher)
+
+        md1 = (tmp_path / "run1" / "generated_wiki" / "lead_1" / "vendors.md").read_text()
+        md2 = (tmp_path / "run2" / "generated_wiki" / "lead_1" / "vendors.md").read_text()
+
+        assert md1 == md2
+        assert "run-id-1" not in md1
+        assert "run-id-2" not in md1
+        assert "generated_at" not in md1
+        assert f"Source: {VENDORS_URL}" in md1
+
     def test_does_not_read_market_registry(self, tmp_path):
         input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
         paths = _make_paths(tmp_path)
