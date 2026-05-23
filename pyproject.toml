@@ -21,6 +21,7 @@ dev = [
 
 [project.scripts]
 farmles_harvester = "farmles_harvester.cli:main"
+report_crawl = "farmles_harvester.cli_report:main"
 
 [tool.setuptools.packages.find]
 include = ["farmles_harvester*"]

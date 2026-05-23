@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from farmles_harvester.constants import CandidateType, CandidateStatus, CandidateStrength
 from farmles_harvester.models.record_contracts import DISCOVERED_LINK_REQUIRED, missing_fields
@@ -11,16 +11,31 @@ from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 
 _POSITIVE_SIGNAL_GROUPS: list[tuple[frozenset[str], str, int]] = [
-    (frozenset({"vendor", "vendors", "our-vendors"}), CandidateType.VENDOR_PAGE, 50),
-    (frozenset({"hours", "schedule", "season", "open"}), CandidateType.HOURS_LOCATION_PAGE, 40),
+    # Vendor / farmer discovery
+    (frozenset({"vendor", "vendors", "our-vendors", "sell"}),
+     CandidateType.VENDOR_PAGE, 50),
+    # Location / hours
+    (frozenset({"hours", "schedule", "open"}), CandidateType.HOURS_LOCATION_PAGE, 40),
     (frozenset({"visit", "location", "directions", "parking", "map"}), CandidateType.HOURS_LOCATION_PAGE, 40),
+    # Events / calendar
     (frozenset({"calendar", "events", "opening-day"}), CandidateType.CALENDAR_EVENTS_PAGE, 40),
-    (frozenset({"about", "contact", "faq"}), CandidateType.ABOUT_CONTACT_PAGE, 35),
-    (frozenset({"market", "farmers-market"}), CandidateType.GENERAL_MARKET_PAGE, 30),
+    # About / contact / mission
+    (frozenset({"about", "contact", "faq", "mission", "history", "staff"}),
+     CandidateType.ABOUT_CONTACT_PAGE, 35),
+    # General market info — also catches "certified-farmers-markets" via "certified"/"farmers" tokens
+    (frozenset({"market", "farmers-market", "certified", "cfm", "farmer", "farmers"}),
+     CandidateType.GENERAL_MARKET_PAGE, 30),
 ]
 
-_HARD_REJECT = frozenset({"privacy", "terms", "cookies", "login", "cart", "checkout", "wp-admin"})
-_SOFT_PENALTY = frozenset({"feed", "rss", "tag", "category", "author", "blog", "archive", "covid"})
+_HARD_REJECT = frozenset({"privacy", "terms", "cookies", "login", "cart", "checkout", "wp-admin", "cdn-cgi"})
+_SOFT_PENALTY = frozenset({
+    "feed", "rss", "tag", "tags", "category", "author",
+    "blog", "archive", "covid",
+    "recipe", "recipes", "eat",
+    "video", "videos",
+    "market-match",  # EBT/CalFresh program page, not a market info page
+    "page",          # pagination query param (?page=N)
+})
 
 _DEFAULT_SELECTED_THRESHOLD = 40
 _DEFAULT_STRONG_THRESHOLD = 70
@@ -44,11 +59,13 @@ class CandidateScore:
 
 
 def _tokenize(url: str, text: str) -> set[str]:
-    path = urlparse(url).path.lower()
+    parsed = urlparse(url)
+    path = parsed.path.lower()
     raw_segments = {s for s in path.split("/") if s}
     word_tokens = {t for t in re.split(r"[/\-_]+", path) if t}
     text_tokens = set(text.lower().split())
-    return raw_segments | word_tokens | text_tokens
+    query_keys = set(parse_qs(parsed.query).keys())
+    return raw_segments | word_tokens | text_tokens | query_keys
 
 
 def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -> CandidateScore:
@@ -95,6 +112,16 @@ def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -
         if term in tokens:
             score -= 30
             reasons.append(f"-30 soft penalty: {term}")
+
+    # Extra penalty for explicit page numbers > 1 (duplicate paginated views)
+    page_vals = parse_qs(urlparse(link_record.discovered_url).query).get("page", [])
+    if page_vals:
+        try:
+            if int(page_vals[0]) > 1:
+                score -= 60
+                reasons.append(f"-60 paginated view (page={page_vals[0]})")
+        except ValueError:
+            pass
 
     score = max(0, min(100, score))
 
