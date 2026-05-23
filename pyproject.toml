@@ -10,6 +10,7 @@ dependencies = [
     "beautifulsoup4",
     "markdownify",
     "requests",
+    "rich",
 ]
 
 [project.optional-dependencies]

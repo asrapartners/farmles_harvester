@@ -57,6 +57,27 @@ class TestNormalizeUrl:
         result = normalize_url("https://this-domain-does-not-exist.invalid/page")
         assert result.status == "normalized"
 
+    def test_strips_index_php_path_prefix(self):
+        result = normalize_url("https://www.pcfma.org/index.php/market/berryessa")
+        assert result.status == "normalized"
+        assert result.normalized_url == "https://www.pcfma.org/market/berryessa"
+        assert any("index.php" in note for note in result.notes)
+
+    def test_strips_bare_index_php(self):
+        result = normalize_url("https://www.pcfma.org/index.php")
+        assert result.status == "normalized"
+        assert result.normalized_url == "https://www.pcfma.org/"
+
+    def test_does_not_alter_non_php_paths(self):
+        result = normalize_url("https://example.com/market/downtown")
+        assert result.status == "normalized"
+        assert result.normalized_url == "https://example.com/market/downtown"
+
+    def test_does_not_strip_index_php_in_subpath(self):
+        result = normalize_url("https://example.com/archive/index.php/old-page")
+        assert result.status == "normalized"
+        assert result.normalized_url == "https://example.com/archive/index.php/old-page"
+
 
 class TestIsInternalLink:
     def test_same_domain_is_internal(self):

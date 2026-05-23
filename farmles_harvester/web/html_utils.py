@@ -1,7 +1,10 @@
+import warnings
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 _IGNORED_SCHEMES = ("mailto:", "tel:", "javascript:")
 

@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from farmles_harvester.constants import CandidateType, CandidateStatus, CandidateStrength
 from farmles_harvester.models.record_contracts import DISCOVERED_LINK_REQUIRED, missing_fields
-from farmles_harvester.pipeline.jsonl import read_jsonl, write_json, write_jsonl
+from farmles_harvester.pipeline.jsonl import JsonlWriter, stream_jsonl, write_json
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 
@@ -129,10 +129,9 @@ def run_score_candidate_urls(
 ) -> StageResult:
     started_at = datetime.now(timezone.utc).isoformat()
 
-    input_records = read_jsonl(input_path)
-    output_records: list[dict] = []
-    error_records: list[dict] = []
-
+    input_count = 0
+    output_count = 0
+    error_count = 0
     selected_count = 0
     rejected_count = 0
     external_reference_count = 0
@@ -140,68 +139,71 @@ def run_score_candidate_urls(
     medium_count = 0
     weak_count = 0
 
-    for record in input_records:
-        missing = missing_fields(record, DISCOVERED_LINK_REQUIRED)
-        if missing:
-            error_records.append({
+    with JsonlWriter(stage_paths.output_path) as out, \
+         JsonlWriter(stage_paths.errors_path) as err:
+
+        for record in stream_jsonl(input_path):
+            input_count += 1
+            missing = missing_fields(record, DISCOVERED_LINK_REQUIRED)
+            if missing:
+                err.write({
+                    "run_id": run_id,
+                    "stage_name": "score_candidate_urls",
+                    "source_lead_id": record.get("source_lead_id"),
+                    "discovered_url": record.get("discovered_url"),
+                    "error_type": "invalid_input_record",
+                    "message": f"Missing required fields: {sorted(missing)}",
+                    "retryable": False,
+                    "created_at": started_at,
+                })
+                error_count += 1
+                continue
+
+            link_record = LinkRecord(
+                discovered_url=record["discovered_url"],
+                link_text=record["link_text"],
+                is_internal=record["is_internal"],
+                follow_allowed=record["follow_allowed"],
+            )
+
+            result = score_discovered_link(link_record, config=config)
+            scored_at = datetime.now(timezone.utc).isoformat()
+
+            if result.candidate_status == CandidateStatus.SELECTED:
+                selected_count += 1
+            elif result.candidate_status == CandidateStatus.EXTERNAL_REFERENCE:
+                external_reference_count += 1
+            else:
+                rejected_count += 1
+
+            if result.candidate_strength == CandidateStrength.STRONG:
+                strong_count += 1
+            elif result.candidate_strength == CandidateStrength.MEDIUM:
+                medium_count += 1
+            else:
+                weak_count += 1
+
+            out.write({
                 "run_id": run_id,
-                "stage_name": "score_candidate_urls",
-                "source_lead_id": record.get("source_lead_id"),
-                "discovered_url": record.get("discovered_url"),
-                "error_type": "invalid_input_record",
-                "message": f"Missing required fields: {sorted(missing)}",
-                "retryable": False,
-                "created_at": started_at,
+                "source_lead_id": record["source_lead_id"],
+                "source_url": record["source_url"],
+                "candidate_url": record["discovered_url"],
+                "link_text": record["link_text"],
+                "candidate_type": result.candidate_type,
+                "candidate_score": result.candidate_score,
+                "candidate_status": result.candidate_status,
+                "candidate_strength": result.candidate_strength,
+                "score_reasons": result.score_reasons,
+                "scored_at": scored_at,
             })
-            continue
-
-        link_record = LinkRecord(
-            discovered_url=record["discovered_url"],
-            link_text=record["link_text"],
-            is_internal=record["is_internal"],
-            follow_allowed=record["follow_allowed"],
-        )
-
-        result = score_discovered_link(link_record, config=config)
-        scored_at = datetime.now(timezone.utc).isoformat()
-
-        if result.candidate_status == CandidateStatus.SELECTED:
-            selected_count += 1
-        elif result.candidate_status == CandidateStatus.EXTERNAL_REFERENCE:
-            external_reference_count += 1
-        else:
-            rejected_count += 1
-
-        if result.candidate_strength == CandidateStrength.STRONG:
-            strong_count += 1
-        elif result.candidate_strength == CandidateStrength.MEDIUM:
-            medium_count += 1
-        else:
-            weak_count += 1
-
-        output_records.append({
-            "run_id": run_id,
-            "source_lead_id": record["source_lead_id"],
-            "source_url": record["source_url"],
-            "candidate_url": record["discovered_url"],
-            "link_text": record["link_text"],
-            "candidate_type": result.candidate_type,
-            "candidate_score": result.candidate_score,
-            "candidate_status": result.candidate_status,
-            "candidate_strength": result.candidate_strength,
-            "score_reasons": result.score_reasons,
-            "scored_at": scored_at,
-        })
-
-    write_jsonl(stage_paths.output_path, output_records)
-    write_jsonl(stage_paths.errors_path, error_records)
+            output_count += 1
 
     completed_at = datetime.now(timezone.utc).isoformat()
 
     counts = {
-        "input_records": len(input_records),
-        "output_records": len(output_records),
-        "error_records": len(error_records),
+        "input_records": input_count,
+        "output_records": output_count,
+        "error_records": error_count,
         "selected_count": selected_count,
         "rejected_count": rejected_count,
         "external_reference_count": external_reference_count,

@@ -85,12 +85,29 @@ class TestRunGenerateMarkdownPages:
         assert summary["selected_candidates"] == 1
         assert summary["skipped_candidates"] == 2
 
-    def test_writes_markdown_under_stable_source_slug_path(self, tmp_path):
+    def test_writes_markdown_mirroring_url_path(self, tmp_path):
         input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
         paths = _make_paths(tmp_path)
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
-        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md"
+        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "vendors" / "index.md"
+        assert md_file.exists()
+
+    def test_pages_directory_is_not_created(self, tmp_path):
+        input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
+        pages_dir = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages"
+        assert not pages_dir.exists()
+
+    def test_root_url_writes_index_md_at_source_root(self, tmp_path):
+        root_html = "<html><body><h1>Home</h1></body></html>"
+        input_path = _make_input(tmp_path, [_candidate(SOURCE_URL, "general_market_page")])
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{SOURCE_URL: root_html}))
+        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "index.md"
         assert md_file.exists()
 
     def test_writes_stable_source_metadata_json(self, tmp_path):
@@ -111,7 +128,7 @@ class TestRunGenerateMarkdownPages:
         paths = _make_paths(tmp_path)
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
-        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md"
+        md_file = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "vendors" / "index.md"
         content = md_file.read_text()
         assert "Vendors" in content
         assert "Smith Farm - vegetables and eggs" in content
@@ -136,24 +153,35 @@ class TestRunGenerateMarkdownPages:
         for record in records:
             assert record["source_slug"] == SOURCE_SLUG
 
-    def test_filename_collision_does_not_overwrite(self, tmp_path):
+    def test_two_different_urls_write_to_separate_paths(self, tmp_path):
+        our_vendors_url = f"{SOURCE_URL}our-vendors"
         records = [
             _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
-            _candidate(f"{SOURCE_URL}our-vendors", "vendor_page", lead_id="lead_1"),
+            _candidate(our_vendors_url, "vendor_page", lead_id="lead_1"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
         fetcher = FakeFetcher({
             VENDORS_URL: FakeResponse(url=VENDORS_URL, status_code=200,
                                       content_type="text/html", text="<p>Vendors 1</p>"),
-            f"{SOURCE_URL}our-vendors": FakeResponse(
-                url=f"{SOURCE_URL}our-vendors", status_code=200,
-                content_type="text/html", text="<p>Vendors 2</p>"),
+            our_vendors_url: FakeResponse(url=our_vendors_url, status_code=200,
+                                          content_type="text/html", text="<p>Vendors 2</p>"),
         })
         run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher)
-        pages_dir = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "pages"
-        assert (pages_dir / "vendors.md").exists()
-        assert (pages_dir / "vendors-2.md").exists()
+        source_dir = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG
+        assert (source_dir / "vendors" / "index.md").exists()
+        assert (source_dir / "our-vendors" / "index.md").exists()
+
+    def test_duplicate_candidate_url_is_fetched_only_once(self, tmp_path):
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(**{VENDORS_URL: VENDOR_HTML})
+        run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher)
+        assert fetcher.requested_urls.count(VENDORS_URL) == 1
 
     def test_non_html_response_writes_output_record_no_markdown_no_error(self, tmp_path):
         pdf_url = f"{SOURCE_URL}brochure.pdf"
@@ -229,8 +257,8 @@ class TestRunGenerateMarkdownPages:
         paths2 = StagePaths.for_stage(tmp_path / "run2", "04", "markdown_pages")
         run_generate_markdown_pages(input2, paths2, "run-id-2", fetcher=fetcher)
 
-        md1 = (tmp_path / "run1" / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md").read_text()
-        md2 = (tmp_path / "run2" / "generated_wiki" / "sources" / SOURCE_SLUG / "pages" / "vendors.md").read_text()
+        md1 = (tmp_path / "run1" / "generated_wiki" / "sources" / SOURCE_SLUG / "vendors" / "index.md").read_text()
+        md2 = (tmp_path / "run2" / "generated_wiki" / "sources" / SOURCE_SLUG / "vendors" / "index.md").read_text()
 
         assert md1 == md2
         assert "run-id-1" not in md1
@@ -247,3 +275,99 @@ class TestRunGenerateMarkdownPages:
         run_generate_markdown_pages(input_path, paths, RUN_ID,
                                     fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
         assert not registry.exists()
+
+
+_SHARED_NAV = "<nav><a href='/a'>SiteMenuA</a><a href='/b'>SiteMenuB</a><a href='/c'>SiteMenuC</a></nav>"
+_SHARED_FOOTER = "<footer>Copyright ACME Corp. All rights reserved.</footer>"
+
+_VENDOR_1_URL = f"{SOURCE_URL}vendor/farm-alpha"
+_VENDOR_2_URL = f"{SOURCE_URL}vendor/farm-beta"
+_VENDOR_3_URL = f"{SOURCE_URL}vendor/farm-gamma"
+
+_VENDOR_1_HTML = f"<html><body>{_SHARED_NAV}<main><h1>Farm Alpha</h1><p>Sells apples.</p></main>{_SHARED_FOOTER}</body></html>"
+_VENDOR_2_HTML = f"<html><body>{_SHARED_NAV}<main><h1>Farm Beta</h1><p>Sells honey.</p></main>{_SHARED_FOOTER}</body></html>"
+_VENDOR_3_HTML = f"<html><body>{_SHARED_NAV}<main><h1>Farm Gamma</h1><p>Sells eggs.</p></main>{_SHARED_FOOTER}</body></html>"
+
+
+class TestBoilerplateStripping:
+    def _run_three_vendors(self, tmp_path):
+        records = [
+            _candidate(_VENDOR_1_URL, "vendor_page"),
+            _candidate(_VENDOR_2_URL, "vendor_page"),
+            _candidate(_VENDOR_3_URL, "vendor_page"),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(**{
+            _VENDOR_1_URL: _VENDOR_1_HTML,
+            _VENDOR_2_URL: _VENDOR_2_HTML,
+            _VENDOR_3_URL: _VENDOR_3_HTML,
+        })
+        run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher)
+        return paths, tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG
+
+    def _all_md_contents(self, source_dir):
+        return [f.read_text() for f in source_dir.rglob("*.md")]
+
+    def test_shared_nav_not_in_output_files(self, tmp_path):
+        _, source_dir = self._run_three_vendors(tmp_path)
+        for content in self._all_md_contents(source_dir):
+            assert "SiteMenuA" not in content
+            assert "SiteMenuB" not in content
+            assert "SiteMenuC" not in content
+
+    def test_shared_footer_not_in_output_files(self, tmp_path):
+        _, source_dir = self._run_three_vendors(tmp_path)
+        for content in self._all_md_contents(source_dir):
+            assert "Copyright ACME Corp" not in content
+
+    def test_unique_content_preserved(self, tmp_path):
+        _, source_dir = self._run_three_vendors(tmp_path)
+        contents = self._all_md_contents(source_dir)
+        all_text = "\n".join(contents)
+        assert "Sells apples" in all_text
+        assert "Sells honey" in all_text
+        assert "Sells eggs" in all_text
+
+    def test_h1_vendor_name_preserved(self, tmp_path):
+        _, source_dir = self._run_three_vendors(tmp_path)
+        contents = self._all_md_contents(source_dir)
+        all_text = "\n".join(contents)
+        assert "Farm Alpha" in all_text
+        assert "Farm Beta" in all_text
+        assert "Farm Gamma" in all_text
+
+    def test_source_url_footer_still_appended(self, tmp_path):
+        _, source_dir = self._run_three_vendors(tmp_path)
+        for content in self._all_md_contents(source_dir):
+            assert "Source:" in content
+
+    def test_single_page_falls_back_to_semantic_stripping(self, tmp_path):
+        single_html = (
+            "<html><body>"
+            "<nav>Single Page Nav Links Here</nav>"
+            "<main><h1>Market Info</h1><p>Hours: 9am to 1pm Saturday.</p></main>"
+            "</body></html>"
+        )
+        single_url = f"{SOURCE_URL}market-info"
+        input_path = _make_input(tmp_path, [_candidate(single_url, "hours_location_page")])
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{single_url: single_html}))
+        source_dir = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG
+        contents = self._all_md_contents(source_dir)
+        assert any("Market Info" in c for c in contents)
+        assert all("Single Page Nav Links Here" not in c for c in contents)
+
+    def test_output_records_satisfy_contract(self, tmp_path):
+        paths, _ = self._run_three_vendors(tmp_path)
+        records = read_jsonl(paths.output_path)
+        assert len(records) == 3
+        for record in records:
+            require_fields(record, MARKDOWN_PAGE_REQUIRED)
+
+    def test_summary_keys_present(self, tmp_path):
+        paths, _ = self._run_three_vendors(tmp_path)
+        summary = json.loads(paths.summary_path.read_text())
+        assert "selected_candidates" in summary
+        assert "skipped_candidates" in summary

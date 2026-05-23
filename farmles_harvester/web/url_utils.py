@@ -59,6 +59,13 @@ def normalize_url(raw_url: str) -> NormalizedUrlResult:
 
     path = parsed.path
 
+    if path.startswith("/index.php/"):
+        path = path[len("/index.php"):]
+        notes.append("stripped /index.php front-controller prefix")
+    elif path == "/index.php":
+        path = "/"
+        notes.append("stripped /index.php front-controller prefix")
+
     query = parsed.query
     if query:
         params = parse_qs(query, keep_blank_values=True)

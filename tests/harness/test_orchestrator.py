@@ -97,6 +97,7 @@ class TestRunPipeline:
             "02_discover_links",
             "03_score_candidate_urls",
             "04_generate_markdown_pages",
+            "05_strip_boilerplate_blocks",
         ]
 
     def test_writes_expected_artifacts(self, tmp_path):
@@ -121,6 +122,7 @@ class TestRunPipeline:
             "02_discover_links",
             "03_score_candidate_urls",
             "04_generate_markdown_pages",
+            "05_strip_boilerplate_blocks",
         }
 
     def test_uses_fake_fetcher_no_real_network(self, tmp_path):
@@ -165,12 +167,16 @@ class TestRunPipeline:
         assert len(manifest["execution_log"]) == 1
 
     def test_cli_parses_arguments_and_reports_run_folder(self, tmp_path, capsys):
+        import json as _json
         seed = _make_seed(tmp_path)
         runs_dir = tmp_path / "runs"
+        fake_run_dir = runs_dir / "2026-05-17_132400_smoke-test"
+        fake_run_dir.mkdir(parents=True)
+        (fake_run_dir / "manifest.json").write_text(_json.dumps({"stages": {}}))
 
         with patch(
             "farmles_harvester.cli.run_pipeline",
-            return_value=runs_dir / "2026-05-17_132400_smoke-test",
+            return_value=fake_run_dir,
         ) as mock_run:
             from farmles_harvester.cli import main
             with patch(
@@ -182,4 +188,4 @@ class TestRunPipeline:
 
         mock_run.assert_called_once()
         captured = capsys.readouterr()
-        assert "Run completed" in captured.out
+        assert "Run summary" in captured.out
