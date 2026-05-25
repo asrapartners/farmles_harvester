@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
 from rich.console import Console
 from rich.status import Status
 
@@ -56,18 +57,117 @@ def _print_run_summary(run_dir: Path) -> None:
     _console.print("────────────────────────────────────────────")
 
 
+def _resolve_category(data: dict, cat: str) -> set[str]:
+    if cat == "all":
+        urls: set[str] = set(data.get("ok", []))
+        urls |= set(data.get("suspect", []))
+        for v in data.get("invalid", {}).values():
+            urls |= set(v)
+        return urls
+    if cat == "ok":
+        return set(data.get("ok", []))
+    if cat == "suspect":
+        return set(data.get("suspect", []))
+    if cat == "invalid":
+        urls = set()
+        for v in data.get("invalid", {}).values():
+            urls |= set(v)
+        return urls
+    if cat.startswith("invalid."):
+        sub = cat[len("invalid."):]
+        invalid = data.get("invalid", {})
+        if sub not in invalid:
+            _console.print(f"[red]Unknown invalid sub-category:[/red] {sub!r}")
+            _console.print(f"  Available: {', '.join(sorted(invalid.keys()))}")
+            sys.exit(1)
+        return set(invalid[sub])
+    _console.print(f"[red]Unknown category:[/red] {cat!r}")
+    _console.print("  Valid: ok  suspect  invalid  invalid.<sub>  all")
+    sys.exit(1)
+
+
+def _extract_urls_from_yaml(
+    yaml_path: Path,
+    categories: list[str],
+    skip: list[str],
+) -> list[str]:
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    selected: set[str] = set()
+    for cat in categories:
+        selected |= _resolve_category(data, cat)
+    for cat in skip:
+        selected -= _resolve_category(data, cat)
+    return sorted(selected)
+
+
+def _count_all_yaml_urls(yaml_path: Path) -> int:
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    total = len(data.get("ok", [])) + len(data.get("suspect", []))
+    for v in data.get("invalid", {}).values():
+        total += len(v)
+    return total
+
+
+def _print_yaml_seed_rating(
+    yaml_path: Path,
+    categories: list[str],
+    skip: list[str],
+    selected: int,
+    total: int,
+) -> None:
+    cats_str = " ".join(categories)
+    skip_str = f"  Skip       : {' '.join(skip)}" if skip else ""
+    _console.print()
+    _console.print("── Seed from YAML ────────────────────────────────────────────")
+    _console.print(f"  File       : {yaml_path}")
+    _console.print(f"  Category   : {cats_str}")
+    if skip_str:
+        _console.print(skip_str)
+    _console.print(f"  Selected   : [bold]{selected:,}[/bold] URLs")
+    _console.print(f"  Total YAML : {total:,} URLs across all categories")
+    _console.print("─────────────────────────────────────────────────────────────")
+
+
+def _write_temp_seed(urls: list[str], dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(urls) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="farmles_harvester pipeline runner")
-    parser.add_argument("--seed-file", required=True, type=Path, metavar="PATH",
-                        help="Path to seed URL file")
+
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--seed-file", type=Path, metavar="PATH",
+                              help="Path to plain-text seed URL file")
+    source_group.add_argument("--input-yaml", type=Path, metavar="PATH",
+                              help="Path to crawl_url_result.yaml from report_crawl")
+
+    parser.add_argument("--category", nargs="+", metavar="CAT",
+                        help="Categories to include from --input-yaml "
+                             "(ok, suspect, invalid, invalid.X, all)")
+    parser.add_argument("--skip", nargs="+", metavar="CAT", default=[],
+                        help="Categories to exclude (applied after --category)")
     parser.add_argument("--tag", required=True,
                         help="Human-readable label for the run")
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"), metavar="DIR",
                         help="Directory where run folders are created (default: runs/)")
     parser.add_argument("--max-depth", type=int, default=10, metavar="N",
-                        help="Link discovery depth (default: 10; crawl stops early when no more "
-                             "internal links are found — high values fetch more pages)")
+                        help="Link discovery depth (default: 10)")
     args = parser.parse_args()
+
+    if args.input_yaml and not args.category:
+        parser.error("--category is required when using --input-yaml")
+
+    seed_file: Path
+    if args.input_yaml:
+        urls = _extract_urls_from_yaml(args.input_yaml, args.category, args.skip)
+        total = _count_all_yaml_urls(args.input_yaml)
+        _print_yaml_seed_rating(args.input_yaml, args.category, args.skip, len(urls), total)
+        cats_slug = "_".join(args.category).replace(".", "_")
+        seed_file = args.runs_dir / f"_yaml_seed_{cats_slug}.txt"
+        _write_temp_seed(urls, seed_file)
+    else:
+        seed_file = args.seed_file
 
     config = {"max_depth": args.max_depth}
 
@@ -91,7 +191,7 @@ def main() -> None:
 
         try:
             run_dir = run_pipeline(
-                seed_file=args.seed_file,
+                seed_file=seed_file,
                 tag=args.tag,
                 runs_dir=args.runs_dir,
                 config=config,

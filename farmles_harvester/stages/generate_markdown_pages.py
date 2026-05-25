@@ -13,10 +13,7 @@ from farmles_harvester.pipeline.jsonl import JsonlWriter, stream_jsonl, write_js
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 from farmles_harvester.web.fetcher import FetchTimeoutError
-from farmles_harvester.web.html_cleaner import (
-    remove_low_density_blocks,
-    remove_semantic_boilerplate,
-)
+from farmles_harvester.web.html_cleaner import clean_html
 from farmles_harvester.web.url_utils import source_url_to_slug
 
 _HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
@@ -215,8 +212,8 @@ def run_generate_markdown_pages(
                 output_count += 1
                 continue
 
-            html = remove_semantic_boilerplate(response.text)
-            html = remove_low_density_blocks(html)
+            min_retention = cfg.get("html_clean_min_word_retention", 0.15)
+            html, content_retention = clean_html(response.text, min_word_retention=min_retention)
 
             rel_path = candidate_url_to_rel_path(url)
             md_path = source_dir / rel_path
@@ -240,6 +237,7 @@ def run_generate_markdown_pages(
                 "markdown_path": rel_path_str,
                 "markdown_filename": rel_path.name,
                 "content_hash": compute_content_hash(markdown_text),
+                "content_retention_ratio": round(content_retention, 4),
                 "generated_at": generated_at,
             })
             output_count += 1

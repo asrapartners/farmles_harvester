@@ -3,18 +3,21 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from farmles_harvester.constants import SourceRelevanceLabel
 from farmles_harvester.orchestrator.exceptions import PipelineError
 from farmles_harvester.orchestrator.manifest import (
     create_initial_manifest,
     record_stage_result,
     write_manifest,
 )
+from farmles_harvester.pipeline.jsonl import read_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 from farmles_harvester.stages.discover_links import run_discover_links
 from farmles_harvester.stages.generate_markdown_pages import run_generate_markdown_pages
 from farmles_harvester.stages.normalize_source_leads import run_normalize_source_leads
 from farmles_harvester.stages.score_candidate_urls import run_score_candidate_urls
+from farmles_harvester.stages.score_source_relevance import run_score_source_relevance
 from farmles_harvester.stages.strip_boilerplate_blocks import run_strip_boilerplate_blocks
 from farmles_harvester.stages.validate_urls import run_validate_urls
 
@@ -42,7 +45,7 @@ def run_pipeline(
     manifest = create_initial_manifest(
         run_id=run_id,
         tag=tag,
-        seed_file_snapshot="seed_urls.txt",
+        seed_file_snapshot=str(seed_file),
         created_at=created_at,
     )
     manifest_path = run_dir / "manifest.json"
@@ -119,4 +122,51 @@ def run_pipeline(
         config=config,
     ))
 
+    paths_06 = StagePaths.for_stage(run_dir, "06", "source_relevance")
+    _notify("06_score_source_relevance", "Scoring source relevance")
+    result_06 = run_score_source_relevance(
+        input_path=paths_05.output_path,
+        stage_paths=paths_06,
+        run_id=run_id,
+        config=config,
+    )
+    _record_and_check(result_06)
+    _print_relevance_summary(paths_06.output_path)
+
     return run_dir
+
+
+def _print_relevance_summary(relevance_jsonl: Path) -> None:
+    if not relevance_jsonl.exists():
+        return
+
+    records = read_jsonl(relevance_jsonl)
+    counts: dict[str, int] = {}
+    low_conf: list[dict] = []
+
+    for r in records:
+        label = r.get("relevance_label", "unknown")
+        counts[label] = counts.get(label, 0) + 1
+        if label == SourceRelevanceLabel.LOW_CONFIDENCE:
+            low_conf.append(r)
+
+    print()
+    print("── Source Relevance Summary ──────────────────────────────────")
+    for label in [
+        SourceRelevanceLabel.CONFIRMED,
+        SourceRelevanceLabel.LIKELY,
+        SourceRelevanceLabel.UNCERTAIN,
+        SourceRelevanceLabel.LOW_CONFIDENCE,
+    ]:
+        n = counts.get(label, 0)
+        note = "  ← review before next run" if label == SourceRelevanceLabel.LOW_CONFIDENCE and n else ""
+        print(f"  {label:<20} {n}{note}")
+
+    if low_conf:
+        print()
+        print("  Low-confidence sources:")
+        for r in sorted(low_conf, key=lambda x: x["source_slug"]):
+            hits = r.get("keyword_hits", 0)
+            words = r.get("total_word_count", 0)
+            print(f"    • {r['source_slug']:<50}  ({hits} keyword hits, {words} words)")
+    print("─────────────────────────────────────────────────────────────")

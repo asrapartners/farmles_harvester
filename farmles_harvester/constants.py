@@ -19,3 +19,10 @@ class CandidateStrength:
     STRONG = "strong"
     MEDIUM = "medium"
     WEAK = "weak"
+
+
+class SourceRelevanceLabel:
+    CONFIRMED = "confirmed"
+    LIKELY = "likely"
+    UNCERTAIN = "uncertain"
+    LOW_CONFIDENCE = "low_confidence"

@@ -50,6 +50,16 @@ MUST_SELECT = [
     ("https://example.org/about",  "About",                CandidateType.ABOUT_CONTACT_PAGE),
     (f"{BASE}/mission",            "Mission",              CandidateType.ABOUT_CONTACT_PAGE),
     ("https://example.org/faq",    "FAQ",                  CandidateType.ABOUT_CONTACT_PAGE),
+
+    # --- EBT/SNAP/WIC program signals — high confidence a site is a certified market ---
+    # These were previously rejected but are now selected because the acronyms are
+    # strong indicators of certified market participation.
+    (f"{BASE}/bonus",              "Produce Bonus for Seniors FMNP & eWIC",  CandidateType.GENERAL_MARKET_PAGE),
+    ("https://example.org/ebt-accepted",  "EBT Accepted",   CandidateType.GENERAL_MARKET_PAGE),
+    ("https://example.org/snap-benefits", "SNAP Benefits",  CandidateType.GENERAL_MARKET_PAGE),
+
+    # --- food signals ---
+    (f"{BASE}/eat",                "Eat",                  CandidateType.GENERAL_MARKET_PAGE),
 ]
 # fmt: on
 
@@ -71,30 +81,26 @@ def test_should_be_selected(url: str, text: str, exp_type: str) -> None:
 # MUST_REJECT — algorithm must mark these REJECTED
 # fmt: off
 MUST_REJECT = [
-    # accessibility / EBT / SNAP / WIC program pages (low-value for wiki purposes)
-    (f"{BASE}/bonus",              "Produce Bonus for Seniors FMNP & eWIC"),
+    # program/CalFresh pages that don't score as market-specific content
     (f"{BASE}/market-match",       "Market Match CalFresh/EBT"),
-    ("https://example.org/ebt-accepted",  "EBT Accepted"),
-    ("https://example.org/snap-benefits", "SNAP Benefits"),
     ("https://example.org/calfresh",      "CalFresh"),
+
+    # tag / category pages — even when the tag name looks valuable, tag penalty dominates
+    (f"{BASE}/tags/news",   "News"),
+    (f"{BASE}/tags/wic",    "WIC"),     # "wic" is an EBT keyword — tag penalty must dominate
+    (f"{BASE}/tags/ebt",    "EBT"),     # same
 
     # blog / news archive
     (f"{BASE}/blog",                        "Blog"),
     (f"{BASE}/blog/usda-grant-some-story",  "USDA Grant Story"),
     (f"{BASE}/news/2024/spring-update",     "Spring Update"),
 
-    # tag / category pages — even when the tag name looks valuable
-    (f"{BASE}/tags/news",   "News"),
-    (f"{BASE}/tags/wic",    "WIC"),     # "wic" is an EBT keyword — tag penalty must dominate
-    (f"{BASE}/tags/ebt",    "EBT"),     # same
-
     # RSS / feed
     (f"{BASE}/rss.xml",                     "Subscribe to"),  # tokeniser must catch .xml
     ("https://example.org/feed",            "RSS Feed"),
 
-    # recipes / food content
+    # recipes (soft-penalised path)
     (f"{BASE}/recipes/cherry-arugula-salad", "Cherry Arugula Salad"),
-    (f"{BASE}/eat",                          "Eat"),
     (f"{BASE}/eat/recipes",                  "Recipes"),
 
     # videos
@@ -120,6 +126,13 @@ MUST_REJECT = [
     ("https://example.org/login",            "Login"),
     ("https://example.org/wp-admin",         "Admin"),
     ("https://example.org/checkout",         "Checkout"),
+
+    # WordPress social share URLs — ?share=* returns an empty redirect, not page content.
+    # Must be rejected even when the path itself has high-value tokens.
+    ("https://archwoodgreenbarns.com/?share=facebook",              ""),
+    ("https://archwoodgreenbarns.com/?share=twitter",               ""),
+    ("https://archwoodgreenbarns.com/meet-the-vendors/?share=facebook", "Meet the Vendors"),
+    ("https://archwoodgreenbarns.com/become-a-vendor/?share=twitter",   "Become a Vendor"),
 ]
 # fmt: on
 
@@ -209,3 +222,21 @@ def test_candidate_strength_weak_for_low_score() -> None:
 def test_score_reasons_are_populated_for_matched_signals() -> None:
     result = score_discovered_link(_link("https://example.org/vendors", "Vendors"))
     assert len(result.score_reasons) > 0
+
+
+def test_social_share_url_scores_zero_regardless_of_path() -> None:
+    # ?share=facebook on a high-value path must score 0 — the share param means
+    # WordPress will redirect to a social network, not serve page content.
+    result = score_discovered_link(
+        _link("https://archwoodgreenbarns.com/meet-the-vendors/?share=facebook", "Meet the Vendors")
+    )
+    assert result.candidate_score == 0
+    assert result.candidate_status == CandidateStatus.REJECTED
+
+
+def test_social_share_does_not_affect_clean_url() -> None:
+    # The same path without ?share= must still be selected.
+    result = score_discovered_link(
+        _link("https://archwoodgreenbarns.com/meet-the-vendors/", "Meet the Vendors")
+    )
+    assert result.candidate_status == CandidateStatus.SELECTED

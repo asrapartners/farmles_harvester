@@ -2,12 +2,17 @@ import hashlib
 import re
 import warnings
 
-from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning, XMLParsedAsHTMLWarning
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 
 _BOILERPLATE_TAGS = frozenset(["header", "nav", "footer", "aside"])
 _BOILERPLATE_PATTERNS = frozenset(["nav", "header", "footer", "menu", "sidebar", "breadcrumb"])
+# Word-boundary regex so "nav" matches "site-nav" but not "navigation"
+_BOILERPLATE_RE = re.compile(
+    r"\b(" + "|".join(sorted(_BOILERPLATE_PATTERNS, key=len, reverse=True)) + r")\b"
+)
 _BLOCK_ELEMENT_TAGS = ["div", "section", "ul", "ol", "nav", "header", "footer", "aside"]
 _BLOCK_CHILD_TAGS = frozenset(["div", "section", "ul", "ol", "article", "p", "header", "nav", "footer", "aside"])
 
@@ -30,7 +35,7 @@ def remove_semantic_boilerplate(html: str) -> str:
             continue
         classes = " ".join(tag.get("class", [])).lower()
         tag_id = tag.get("id", "").lower()
-        if any(p in classes or p in tag_id for p in _BOILERPLATE_PATTERNS):
+        if _BOILERPLATE_RE.search(classes) or _BOILERPLATE_RE.search(tag_id):
             to_remove.append(tag)
 
     for tag in to_remove:
@@ -121,3 +126,34 @@ def remove_low_density_blocks(
         child.decompose()
 
     return str(soup)
+
+
+def _count_html_words(html: str) -> int:
+    text = BeautifulSoup(html, "html.parser").get_text(separator=" ", strip=True)
+    return len(re.findall(r"\w+", text))
+
+
+def clean_html(html: str, min_word_retention: float = 0.15) -> tuple[str, float]:
+    """Apply semantic + density cleaning with a word-retention fallback.
+
+    If the density filter would drop more than (1 - min_word_retention) of the original
+    words, it is skipped and only the semantic result is returned. This prevents link-heavy
+    but content-rich pages (e.g. vendor lists) from being emptied.
+
+    Returns (cleaned_html, retention_ratio) where retention_ratio = words_after / words_before
+    (1.0 when the raw page is already empty).
+    """
+    words_before = _count_html_words(html)
+
+    after_semantic = remove_semantic_boilerplate(html)
+    after_density = remove_low_density_blocks(after_semantic)
+
+    words_after = _count_html_words(after_density)
+    retention = words_after / words_before if words_before > 0 else 1.0
+
+    if words_before > 0 and retention < min_word_retention:
+        words_semantic = _count_html_words(after_semantic)
+        retention = words_semantic / words_before
+        return after_semantic, retention
+
+    return after_density, retention

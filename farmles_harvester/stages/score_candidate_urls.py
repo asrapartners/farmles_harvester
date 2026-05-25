@@ -20,18 +20,33 @@ _POSITIVE_SIGNAL_GROUPS: list[tuple[frozenset[str], str, int]] = [
     # Events / calendar
     (frozenset({"calendar", "events", "opening-day"}), CandidateType.CALENDAR_EVENTS_PAGE, 40),
     # About / contact / mission
-    (frozenset({"about", "contact", "faq", "mission", "history", "staff"}),
+    (frozenset({"about", "contact", "faq", "faqs", "mission", "history", "staff"}),
      CandidateType.ABOUT_CONTACT_PAGE, 35),
     # General market info — also catches "certified-farmers-markets" via "certified"/"farmers" tokens
-    (frozenset({"market", "farmers-market", "certified", "cfm", "farmer", "farmers"}),
+    (frozenset({"market", "markets", "farmers-market", "certified", "cfm", "farmer", "farmers"}),
      CandidateType.GENERAL_MARKET_PAGE, 30),
+    # Food / produce signals
+    (frozenset({"food", "drink", "eat"}),
+     CandidateType.GENERAL_MARKET_PAGE, 30),
+    # Farmer's market nutrition program acronyms — high confidence signals
+    (frozenset({"fmnp", "sfmnp", "snap", "ebt", "wic"}),
+     CandidateType.GENERAL_MARKET_PAGE, 45),
 ]
+
+# External domains whose presence as a discovered link is a strong signal the
+# source is a certified farmer's market — boosts all internal rejected candidates.
+_PROGRAM_LINK_DOMAINS = frozenset({
+    "fns.usda.gov",       # USDA Food & Nutrition Service (SFMNP, SNAP, WIC)
+    "ams.usda.gov",       # USDA Agricultural Marketing Service (farmers market programs)
+    "marketmatch.org",    # Market Match EBT doubling program
+})
+_PROGRAM_LINK_BOOST = 25
 
 _HARD_REJECT = frozenset({"privacy", "terms", "cookies", "login", "cart", "checkout", "wp-admin", "cdn-cgi"})
 _SOFT_PENALTY = frozenset({
     "feed", "rss", "tag", "tags", "category", "author",
     "blog", "archive", "covid",
-    "recipe", "recipes", "eat",
+    "recipe", "recipes",
     "video", "videos",
     "market-match",  # EBT/CalFresh program page, not a market info page
     "page",          # pagination query param (?page=N)
@@ -123,6 +138,15 @@ def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -
         except ValueError:
             pass
 
+    # Hard-reject WordPress/social share URLs (?share=facebook, ?share=twitter, etc.)
+    # These return empty content — the share param triggers a social redirect, not a real page.
+    share_vals = parse_qs(urlparse(link_record.discovered_url).query).get("share", [])
+    if share_vals:
+        score = 0
+        hard_rejected = True
+        candidate_type = CandidateType.LOW_VALUE_PAGE
+        reasons.append(f"-100 social share URL (?share={share_vals[0]})")
+
     score = max(0, min(100, score))
 
     if hard_rejected:
@@ -148,6 +172,10 @@ def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -
     )
 
 
+def _is_homepage(url: str) -> bool:
+    return urlparse(url).path in ("", "/")
+
+
 def run_score_candidate_urls(
     input_path: Path,
     stage_paths: StagePaths,
@@ -156,9 +184,101 @@ def run_score_candidate_urls(
 ) -> StageResult:
     started_at = datetime.now(timezone.utc).isoformat()
 
-    input_count = 0
+    # --- Pass 1: score every record, collect into memory ---
+    scored_rows: list[dict] = []
+    error_rows: list[dict] = []
+
+    for record in stream_jsonl(input_path):
+        missing = missing_fields(record, DISCOVERED_LINK_REQUIRED)
+        if missing:
+            error_rows.append({
+                "run_id": run_id,
+                "stage_name": "score_candidate_urls",
+                "source_lead_id": record.get("source_lead_id"),
+                "discovered_url": record.get("discovered_url"),
+                "error_type": "invalid_input_record",
+                "message": f"Missing required fields: {sorted(missing)}",
+                "retryable": False,
+                "created_at": started_at,
+            })
+            continue
+
+        link_record = LinkRecord(
+            discovered_url=record["discovered_url"],
+            link_text=record["link_text"],
+            is_internal=record["is_internal"],
+            follow_allowed=record["follow_allowed"],
+        )
+        result = score_discovered_link(link_record, config=config)
+        scored_rows.append({
+            "run_id": run_id,
+            "source_lead_id": record["source_lead_id"],
+            "source_url": record["source_url"],
+            "candidate_url": record["discovered_url"],
+            "link_text": record["link_text"],
+            "candidate_type": result.candidate_type,
+            "candidate_score": result.candidate_score,
+            "candidate_status": result.candidate_status,
+            "candidate_strength": result.candidate_strength,
+            "score_reasons": result.score_reasons,
+            "scored_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # --- Pass 2: find sources with meaningful selections or program links ---
+    leads_with_meaningful_selections: set[str] = {
+        row["source_lead_id"]
+        for row in scored_rows
+        if row["candidate_status"] == CandidateStatus.SELECTED
+        and row["candidate_score"] > 20
+        and not _is_homepage(row["candidate_url"])
+    }
+
+    # Sources whose discovered links include an authoritative program domain
+    # (e.g. fns.usda.gov) — strong signal the source is a certified market.
+    leads_with_program_links: set[str] = {
+        row["source_lead_id"]
+        for row in scored_rows
+        if row["candidate_status"] == CandidateStatus.EXTERNAL_REFERENCE
+        and urlparse(row["candidate_url"]).netloc in _PROGRAM_LINK_DOMAINS
+    }
+
+    # --- Pass 3: promote homepages + apply program-link boost ---
+    homepage_promoted_count = 0
+    program_boosted_count = 0
+
+    for row in scored_rows:
+        lead = row["source_lead_id"]
+        is_internal_rejected = (
+            row["candidate_status"] == CandidateStatus.REJECTED
+            and row["candidate_type"] != CandidateType.EXTERNAL_REFERENCE
+        )
+
+        # Apply program-link boost before promotion checks so the boosted
+        # score feeds into the threshold comparison.
+        if is_internal_rejected and lead in leads_with_program_links:
+            new_score = min(100, row["candidate_score"] + _PROGRAM_LINK_BOOST)
+            row["candidate_score"] = new_score
+            row["score_reasons"] = row["score_reasons"] + [f"+{_PROGRAM_LINK_BOOST} program link boost (authoritative external domain)"]
+            if new_score >= (config or {}).get("selected_threshold", _DEFAULT_SELECTED_THRESHOLD):
+                row["candidate_status"] = CandidateStatus.SELECTED
+                row["candidate_strength"] = CandidateStrength.MEDIUM
+                program_boosted_count += 1
+
+        # Promote rejected homepages for sources with meaningful sub-page selections.
+        if (
+            row["candidate_status"] == CandidateStatus.REJECTED
+            and _is_homepage(row["candidate_url"])
+            and lead in leads_with_meaningful_selections
+        ):
+            row["candidate_status"] = CandidateStatus.SELECTED
+            row["candidate_strength"] = CandidateStrength.MEDIUM
+            row["score_reasons"] = row["score_reasons"] + ["homepage promoted: source has meaningful sub-page selections"]
+            homepage_promoted_count += 1
+
+    # --- Write output ---
+    input_count = len(scored_rows) + len(error_rows)
     output_count = 0
-    error_count = 0
+    error_count = len(error_rows)
     selected_count = 0
     rejected_count = 0
     external_reference_count = 0
@@ -169,60 +289,28 @@ def run_score_candidate_urls(
     with JsonlWriter(stage_paths.output_path) as out, \
          JsonlWriter(stage_paths.errors_path) as err:
 
-        for record in stream_jsonl(input_path):
-            input_count += 1
-            missing = missing_fields(record, DISCOVERED_LINK_REQUIRED)
-            if missing:
-                err.write({
-                    "run_id": run_id,
-                    "stage_name": "score_candidate_urls",
-                    "source_lead_id": record.get("source_lead_id"),
-                    "discovered_url": record.get("discovered_url"),
-                    "error_type": "invalid_input_record",
-                    "message": f"Missing required fields: {sorted(missing)}",
-                    "retryable": False,
-                    "created_at": started_at,
-                })
-                error_count += 1
-                continue
+        for row in error_rows:
+            err.write(row)
 
-            link_record = LinkRecord(
-                discovered_url=record["discovered_url"],
-                link_text=record["link_text"],
-                is_internal=record["is_internal"],
-                follow_allowed=record["follow_allowed"],
-            )
+        for row in scored_rows:
+            status = row["candidate_status"]
+            strength = row["candidate_strength"]
 
-            result = score_discovered_link(link_record, config=config)
-            scored_at = datetime.now(timezone.utc).isoformat()
-
-            if result.candidate_status == CandidateStatus.SELECTED:
+            if status == CandidateStatus.SELECTED:
                 selected_count += 1
-            elif result.candidate_status == CandidateStatus.EXTERNAL_REFERENCE:
+            elif status == CandidateStatus.EXTERNAL_REFERENCE:
                 external_reference_count += 1
             else:
                 rejected_count += 1
 
-            if result.candidate_strength == CandidateStrength.STRONG:
+            if strength == CandidateStrength.STRONG:
                 strong_count += 1
-            elif result.candidate_strength == CandidateStrength.MEDIUM:
+            elif strength == CandidateStrength.MEDIUM:
                 medium_count += 1
             else:
                 weak_count += 1
 
-            out.write({
-                "run_id": run_id,
-                "source_lead_id": record["source_lead_id"],
-                "source_url": record["source_url"],
-                "candidate_url": record["discovered_url"],
-                "link_text": record["link_text"],
-                "candidate_type": result.candidate_type,
-                "candidate_score": result.candidate_score,
-                "candidate_status": result.candidate_status,
-                "candidate_strength": result.candidate_strength,
-                "score_reasons": result.score_reasons,
-                "scored_at": scored_at,
-            })
+            out.write(row)
             output_count += 1
 
     completed_at = datetime.now(timezone.utc).isoformat()
@@ -237,6 +325,8 @@ def run_score_candidate_urls(
         "strong_candidate_count": strong_count,
         "medium_candidate_count": medium_count,
         "weak_candidate_count": weak_count,
+        "homepage_promoted_count": homepage_promoted_count,
+        "program_boosted_count": program_boosted_count,
     }
 
     summary = {

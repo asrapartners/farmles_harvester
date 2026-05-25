@@ -1,5 +1,6 @@
 from farmles_harvester.web.html_cleaner import (
     build_boilerplate_fingerprint,
+    clean_html,
     remove_low_density_blocks,
     remove_semantic_boilerplate,
     strip_fingerprinted_boilerplate,
@@ -37,6 +38,19 @@ class TestRemoveSemanticBoilerplate:
         result = remove_semantic_boilerplate(html)
         assert "Title" in result
         assert "Text" in result
+
+    def test_does_not_strip_navigation_class(self):
+        # "navigation" contains "nav" as substring but word-boundary matching should NOT strip it
+        html = "<body><div class='navigation'>Market directions</div></body>"
+        result = remove_semantic_boilerplate(html)
+        assert "Market directions" in result
+
+    def test_strips_nav_hyphenated_class(self):
+        # "site-nav" — hyphens are word boundaries, so "nav" still matches
+        html = "<body><div class='site-nav'>Menu</div><p>Content</p></body>"
+        result = remove_semantic_boilerplate(html)
+        assert "Content" in result
+        assert "Menu" not in result
 
 
 class TestBuildBoilerplateFingerprint:
@@ -155,3 +169,42 @@ class TestRemoveLowDensityBlocks:
         html = "<body><div>AAAAA<a href='/'>BBBBB</a></div></body>"
         result = remove_low_density_blocks(html)
         assert "AAAAA" in result
+
+
+class TestCleanHtml:
+    def test_returns_retention_ratio(self):
+        html = "<body><p>lots of real text about the farmers market vendors and produce</p></body>"
+        cleaned, ratio = clean_html(html)
+        assert 0.0 <= ratio <= 1.0
+
+    def test_fallback_skips_density_filter_on_heavy_link_page(self):
+        # All content is inside a high-link-density block — density filter would empty the page
+        links = "".join(f"<a href='/{i}'>Market vendor {i} fresh produce</a> " for i in range(20))
+        html = f"<body><div>{links}</div></body>"
+        cleaned, ratio = clean_html(html, min_word_retention=0.15)
+        assert "Market vendor" in cleaned
+
+    def test_no_fallback_when_density_filter_safe(self):
+        html = (
+            "<body>"
+            "<div><a href='/1'>L1</a><a href='/2'>L2</a></div>"
+            "<p>Real content about the local farmers market seasonal produce vendors.</p>"
+            "</body>"
+        )
+        cleaned, ratio = clean_html(html)
+        assert "Real content" in cleaned
+
+    def test_empty_page_returns_ratio_one(self):
+        html = "<body></body>"
+        _cleaned, ratio = clean_html(html)
+        assert ratio == 1.0
+
+    def test_retention_ratio_in_range(self):
+        html = (
+            "<body>"
+            "<nav>Nav links here and there</nav>"
+            "<p>Farmers market open Saturdays fresh organic produce vendors available</p>"
+            "</body>"
+        )
+        _cleaned, ratio = clean_html(html)
+        assert 0.0 <= ratio <= 1.0

@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4",
     "markdownify",
+    "pyyaml",
     "requests",
     "rich",
 ]
@@ -22,6 +23,7 @@ dev = [
 [project.scripts]
 farmles_harvester = "farmles_harvester.cli:main"
 report_crawl = "farmles_harvester.cli_report:main"
+scan_relevance = "farmles_harvester.cli_scan_relevance:main"
 
 [tool.setuptools.packages.find]
 include = ["farmles_harvester*"]
