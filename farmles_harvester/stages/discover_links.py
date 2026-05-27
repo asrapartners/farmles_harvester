@@ -40,6 +40,7 @@ def run_discover_links(
     cfg = config or {}
     max_depth = cfg.get("max_depth", 1)
     follow_threshold = cfg.get("follow_threshold", 40)
+    per_source_follow_cap = cfg.get("per_source_follow_cap", 200)
 
     processed_sources = 0
     skipped_sources = 0
@@ -50,9 +51,12 @@ def run_discover_links(
     input_count = 0
     output_count = 0
     error_count = 0
+    capped_sources = 0
 
     queue: deque = deque()
     visited: set[str] = set()
+    lead_queued: dict[str, int] = {}
+    lead_url_meta: dict[str, dict] = {}
 
     # Seed the BFS queue from validated input records
     input_records_for_queue: list[tuple[str, str, str]] = []
@@ -67,6 +71,10 @@ def run_discover_links(
             final_url = record["final_url"]
             visited.add(final_url)
             queue.append((final_url, 1, record["source_lead_id"], final_url))
+            lead_url_meta[record["source_lead_id"]] = {
+                "input_url": record.get("input_url"),
+                "normalized_url": record.get("normalized_url"),
+            }
 
     with JsonlWriter(stage_paths.output_path) as out, \
          JsonlWriter(stage_paths.errors_path) as err:
@@ -127,6 +135,8 @@ def run_discover_links(
                     "run_id": run_id,
                     "source_lead_id": lead_id,
                     "source_url": seed_url,
+                    "input_url": lead_url_meta.get(lead_id, {}).get("input_url"),
+                    "normalized_url": lead_url_meta.get(lead_id, {}).get("normalized_url"),
                     "raw_href": link.raw_href,
                     "discovered_url": discovered_url,
                     "link_text": link.link_text,
@@ -149,7 +159,13 @@ def run_discover_links(
                         follow_allowed=True,
                     )
                     if score_discovered_link(link_rec, config=config).candidate_score >= follow_threshold:
-                        queue.append((link.discovered_url, current_depth + 1, lead_id, seed_url))
+                        queued = lead_queued.get(lead_id, 0)
+                        if queued < per_source_follow_cap:
+                            lead_queued[lead_id] = queued + 1
+                            queue.append((link.discovered_url, current_depth + 1, lead_id, seed_url))
+                        elif queued == per_source_follow_cap:
+                            lead_queued[lead_id] = queued + 1
+                            capped_sources += 1
 
     completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -163,6 +179,7 @@ def run_discover_links(
         "external_links": external_links,
         "error_records": error_count,
         "max_depth_reached": max_depth_reached,
+        "capped_sources": capped_sources,
     }
 
     summary = {
@@ -170,6 +187,7 @@ def run_discover_links(
         "stage_number": "02",
         "run_id": run_id,
         **counts,
+        "per_source_follow_cap": per_source_follow_cap,
         "started_at": started_at,
         "completed_at": completed_at,
     }

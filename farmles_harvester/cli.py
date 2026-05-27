@@ -153,6 +153,8 @@ def main() -> None:
                         help="Directory where run folders are created (default: runs/)")
     parser.add_argument("--max-depth", type=int, default=10, metavar="N",
                         help="Link discovery depth (default: 10)")
+    parser.add_argument("--per-source-follow-cap", type=int, default=200, metavar="N",
+                        help="Max URLs queued for crawling per seed source (default: 200)")
     args = parser.parse_args()
 
     if args.input_yaml and not args.category:
@@ -169,7 +171,10 @@ def main() -> None:
     else:
         seed_file = args.seed_file
 
-    config = {"max_depth": args.max_depth}
+    config = {
+        "max_depth": args.max_depth,
+        "per_source_follow_cap": args.per_source_follow_cap,
+    }
 
     state = {"stage_label": "Starting", "fetch_count": 0}
 

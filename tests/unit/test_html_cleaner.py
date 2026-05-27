@@ -4,6 +4,7 @@ from farmles_harvester.web.html_cleaner import (
     remove_low_density_blocks,
     remove_semantic_boilerplate,
     strip_fingerprinted_boilerplate,
+    strip_layout_tables,
 )
 
 
@@ -146,6 +147,70 @@ class TestStripFingerprintedBoilerplate:
         assert "Content" in result
 
 
+class TestStripLayoutTables:
+    def _wrap(self, inner: str) -> str:
+        return f"<html><body>{inner}</body></html>"
+
+    def test_removes_nested_table(self):
+        html = self._wrap(
+            "<table><tr><td><table><tr><td>inner</td></tr></table></td></tr></table>"
+            "<p>real content</p>"
+        )
+        result = strip_layout_tables(html)
+        assert "inner" not in result
+        assert "real content" in result
+
+    def test_removes_wide_table(self):
+        cells = "".join(f"<td>col{i}</td>" for i in range(9))
+        html = self._wrap(f"<table><tr>{cells}</tr></table><p>content</p>")
+        result = strip_layout_tables(html)
+        assert "col0" not in result
+        assert "content" in result
+
+    def test_preserves_narrow_table(self):
+        cells = "".join(f"<td>col{i}</td>" for i in range(4))
+        html = self._wrap(f"<table><tr>{cells}</tr></table>")
+        result = strip_layout_tables(html)
+        assert "col0" in result
+        assert "col3" in result
+
+    def test_nested_table_content_gone(self):
+        # Simulates a PHP calendar widget: outer table + per-day sub-tables
+        day_cell = "<td><table><tr><td>8:00am Market Opens</td></tr></table></td>"
+        row = f"<tr>{'<td>Sun</td><td>Mon</td><td>Tue</td><td>Wed</td><td>Thu</td><td>Fri</td><td>Sat</td>'}</tr>"
+        html = self._wrap(
+            f"<table><tr><th>Calendar</th></tr><tr>{day_cell * 7}</tr></table>"
+            "<p>page footer</p>"
+        )
+        result = strip_layout_tables(html)
+        assert "Market Opens" not in result
+        assert "page footer" in result
+
+    def test_narrow_table_content_kept(self):
+        html = self._wrap(
+            "<table>"
+            "<tr><th>Vendor</th><th>Product</th><th>Booth</th></tr>"
+            "<tr><td>Green Acres Farm</td><td>Organic vegetables</td><td>A1</td></tr>"
+            "</table>"
+        )
+        result = strip_layout_tables(html)
+        assert "Green Acres Farm" in result
+        assert "Organic vegetables" in result
+
+    def test_exactly_at_column_limit_kept(self):
+        # 8 columns == _MAX_TABLE_COLS — boundary is exclusive (> 8 strips, == 8 keeps)
+        cells = "".join(f"<td>c{i}</td>" for i in range(8))
+        html = self._wrap(f"<table><tr>{cells}</tr></table>")
+        result = strip_layout_tables(html)
+        assert "c0" in result
+
+    def test_one_over_limit_stripped(self):
+        cells = "".join(f"<td>c{i}</td>" for i in range(9))
+        html = self._wrap(f"<table><tr>{cells}</tr></table>")
+        result = strip_layout_tables(html)
+        assert "c0" not in result
+
+
 class TestRemoveLowDensityBlocks:
     def test_strips_link_only_block(self):
         html = (
@@ -208,3 +273,23 @@ class TestCleanHtml:
         )
         _cleaned, ratio = clean_html(html)
         assert 0.0 <= ratio <= 1.0
+
+    def test_wide_table_stripped_and_no_pipe_rows(self):
+        # A page whose only content is a wide calendar table should be stripped;
+        # the resulting markdown should contain no pipe-table rows.
+        cells = "".join(f"<td>Event {i}</td>" for i in range(9))
+        html = f"<body><table><tr>{cells}</tr></table></body>"
+        cleaned, _ratio = clean_html(html)
+        assert "|" not in cleaned
+
+    def test_narrow_data_table_survives_clean_html(self):
+        html = (
+            "<body>"
+            "<table>"
+            "<tr><th>Vendor</th><th>Produce</th><th>Booth</th></tr>"
+            "<tr><td>Green Acres Farm</td><td>Tomatoes</td><td>A1</td></tr>"
+            "</table>"
+            "</body>"
+        )
+        cleaned, _ratio = clean_html(html)
+        assert "Green Acres Farm" in cleaned

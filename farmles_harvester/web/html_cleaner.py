@@ -16,6 +16,8 @@ _BOILERPLATE_RE = re.compile(
 _BLOCK_ELEMENT_TAGS = ["div", "section", "ul", "ol", "nav", "header", "footer", "aside"]
 _BLOCK_CHILD_TAGS = frozenset(["div", "section", "ul", "ol", "article", "p", "header", "nav", "footer", "aside"])
 
+_MAX_TABLE_COLS = 8  # tables wider than this are layout/grid widgets, not data tables
+
 
 def _normalize_block(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
@@ -23,6 +25,30 @@ def _normalize_block(text: str) -> str:
 
 def _hash_block(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _table_is_layout(table_tag) -> bool:
+    if table_tag.find("table"):
+        return True
+    max_cols = max(
+        (len(row.find_all(["td", "th"])) for row in table_tag.find_all("tr")),
+        default=0,
+    )
+    return max_cols > _MAX_TABLE_COLS
+
+
+def strip_layout_tables(html: str) -> str:
+    """Remove tables that are 2-D layout/calendar grids.
+
+    Targets tables with nested <table> children (layout pattern) or more than
+    _MAX_TABLE_COLS columns (calendar/grid pattern). Narrow data tables such as
+    vendor lists are left intact.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for table in soup.find_all("table"):
+        if table.parent is not None and _table_is_layout(table):
+            table.decompose()
+    return str(soup)
 
 
 def remove_semantic_boilerplate(html: str) -> str:
@@ -146,14 +172,15 @@ def clean_html(html: str, min_word_retention: float = 0.15) -> tuple[str, float]
     words_before = _count_html_words(html)
 
     after_semantic = remove_semantic_boilerplate(html)
-    after_density = remove_low_density_blocks(after_semantic)
+    after_tables = strip_layout_tables(after_semantic)
+    after_density = remove_low_density_blocks(after_tables)
 
     words_after = _count_html_words(after_density)
     retention = words_after / words_before if words_before > 0 else 1.0
 
     if words_before > 0 and retention < min_word_retention:
-        words_semantic = _count_html_words(after_semantic)
-        retention = words_semantic / words_before
-        return after_semantic, retention
+        words_after_tables = _count_html_words(after_tables)
+        retention = words_after_tables / words_before
+        return after_tables, retention
 
     return after_density, retention

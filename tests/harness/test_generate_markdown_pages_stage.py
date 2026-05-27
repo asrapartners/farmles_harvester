@@ -29,12 +29,18 @@ VENDOR_HTML = """\
 _FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "source_lead_id", "timestamp", "content_hash"}
 
 
+INPUT_URL = "apex.example"
+NORMALIZED_URL = SOURCE_URL
+
+
 def _candidate(url: str, candidate_type: str, lead_id: str = "lead_1",
                status: str = CandidateStatus.SELECTED, score: int = 80) -> dict:
     return {
         "run_id": RUN_ID,
         "source_lead_id": lead_id,
         "source_url": SOURCE_URL,
+        "input_url": INPUT_URL,
+        "normalized_url": NORMALIZED_URL,
         "candidate_url": url,
         "candidate_type": candidate_type,
         "candidate_score": score,
@@ -118,9 +124,19 @@ class TestRunGenerateMarkdownPages:
         meta_path = tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "source_metadata.json"
         assert meta_path.exists()
         meta = json.loads(meta_path.read_text())
-        assert set(meta.keys()) == {"source_slug", "input_url", "normalized_url", "final_url"}
+        assert set(meta.keys()) == {"source_slug", "input_url", "normalized_url", "final_url", "pages"}
         assert meta["source_slug"] == SOURCE_SLUG
+        assert meta["input_url"] == INPUT_URL
+        assert meta["normalized_url"] == NORMALIZED_URL
         assert meta["final_url"] == SOURCE_URL
+        assert isinstance(meta["pages"], list)
+        assert len(meta["pages"]) == 1
+        page = meta["pages"][0]
+        assert page["url"] == VENDORS_URL
+        assert page["candidate_type"] == "vendor_page"
+        assert page["candidate_status"] == CandidateStatus.SELECTED
+        assert page["candidate_score"] == 80
+        assert page["markdown_path"] == "vendors/index.md"
         assert not _FORBIDDEN_META_KEYS & set(meta.keys())
 
     def test_html_is_converted_to_markdown(self, tmp_path):
@@ -371,3 +387,130 @@ class TestBoilerplateStripping:
         summary = json.loads(paths.summary_path.read_text())
         assert "selected_candidates" in summary
         assert "skipped_candidates" in summary
+
+
+class TestPagesMetadata:
+    def _meta(self, tmp_path):
+        return json.loads(
+            (tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "source_metadata.json").read_text()
+        )
+
+    def test_fetch_fail_appears_with_null_markdown_path(self, tmp_path):
+        fetcher = FakeFetcher({}, exceptions={VENDORS_URL: RuntimeError("timeout")})
+        input_path = _make_input(tmp_path, [_candidate(VENDORS_URL, "vendor_page")])
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher)
+        pages = self._meta(tmp_path)["pages"]
+        assert len(pages) == 1
+        assert pages[0]["url"] == VENDORS_URL
+        assert pages[0]["candidate_status"] == CandidateStatus.SELECTED
+        assert pages[0]["markdown_path"] is None
+
+    def test_rejected_excluded_by_default(self, tmp_path):
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", status=CandidateStatus.SELECTED),
+            _candidate(VISIT_URL, "hours_location_page", status=CandidateStatus.REJECTED),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
+        urls = [p["url"] for p in self._meta(tmp_path)["pages"]]
+        assert VENDORS_URL in urls
+        assert VISIT_URL not in urls
+
+    def test_external_reference_excluded_by_default(self, tmp_path):
+        ext_url = "https://fb.com/apex"
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", status=CandidateStatus.SELECTED),
+            _candidate(ext_url, "external_reference", status=CandidateStatus.EXTERNAL_REFERENCE),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
+        urls = [p["url"] for p in self._meta(tmp_path)["pages"]]
+        assert VENDORS_URL in urls
+        assert ext_url not in urls
+
+    def test_verbose_includes_all_statuses(self, tmp_path):
+        ext_url = "https://fb.com/apex"
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", status=CandidateStatus.SELECTED),
+            _candidate(VISIT_URL, "hours_location_page", status=CandidateStatus.REJECTED),
+            _candidate(ext_url, "external_reference", status=CandidateStatus.EXTERNAL_REFERENCE),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}),
+                                    config={"verbose_metadata": True})
+        urls = {p["url"] for p in self._meta(tmp_path)["pages"]}
+        assert VENDORS_URL in urls
+        assert VISIT_URL in urls
+        assert ext_url in urls
+
+    def test_verbose_non_selected_has_null_markdown_path(self, tmp_path):
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", status=CandidateStatus.SELECTED),
+            _candidate(VISIT_URL, "hours_location_page", status=CandidateStatus.REJECTED),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}),
+                                    config={"verbose_metadata": True})
+        pages = self._meta(tmp_path)["pages"]
+        rejected = next(p for p in pages if p["url"] == VISIT_URL)
+        assert rejected["candidate_status"] == CandidateStatus.REJECTED
+        assert rejected["markdown_path"] is None
+
+    def test_all_entries_have_status_and_score(self, tmp_path):
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", status=CandidateStatus.SELECTED),
+            _candidate(VISIT_URL, "hours_location_page", status=CandidateStatus.REJECTED),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}),
+                                    config={"verbose_metadata": True})
+        for page in self._meta(tmp_path)["pages"]:
+            assert "candidate_status" in page
+            assert "candidate_score" in page
+
+    def test_duplicate_url_appears_once_in_pages(self, tmp_path):
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(input_path, paths, RUN_ID,
+                                    fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML}))
+        pages = self._meta(tmp_path)["pages"]
+        assert len([p for p in pages if p["url"] == VENDORS_URL]) == 1
+
+    def test_two_sources_get_separate_pages_lists(self, tmp_path):
+        source2_url = "https://beta.example/"
+        source2_slug = "beta-example"
+        vendor2_url = f"{source2_url}vendors"
+        records = [
+            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            {
+                **_candidate(vendor2_url, "vendor_page", lead_id="lead_2"),
+                "source_url": source2_url,
+                "input_url": "beta.example",
+                "normalized_url": source2_url,
+            },
+        ]
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        run_generate_markdown_pages(
+            input_path, paths, RUN_ID,
+            fetcher=_html_fetcher(**{VENDORS_URL: VENDOR_HTML, vendor2_url: VENDOR_HTML}),
+        )
+        meta1 = json.loads((tmp_path / "generated_wiki" / "sources" / SOURCE_SLUG / "source_metadata.json").read_text())
+        meta2 = json.loads((tmp_path / "generated_wiki" / "sources" / source2_slug / "source_metadata.json").read_text())
+        assert all(p["url"].startswith(SOURCE_URL) for p in meta1["pages"])
+        assert all(p["url"].startswith(source2_url) for p in meta2["pages"])

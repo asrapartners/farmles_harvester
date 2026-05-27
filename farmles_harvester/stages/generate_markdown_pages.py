@@ -76,6 +76,7 @@ def run_generate_markdown_pages(
     started_at = datetime.now(timezone.utc).isoformat()
     wiki_dir = stage_paths.output_path.parent / "generated_wiki"
     cfg = config or {}
+    verbose_metadata = cfg.get("verbose_metadata", False)
 
     # --- Phase 1: collect valid, selected, deduplicated records ---
     all_records = list(stream_jsonl(input_path))
@@ -85,16 +86,24 @@ def run_generate_markdown_pages(
     skipped_candidates = 0
     selected_records: list[dict] = []
     seen_urls: set[str] = set()
+    source_candidates: dict[str, list[dict]] = {}
+    seen_per_slug: dict[str, set[str]] = {}
 
     for record in all_records:
         missing = missing_fields(record, CANDIDATE_URL_REQUIRED)
         if missing:
             invalid_records.append(record)
             continue
-        if record["candidate_status"] != CandidateStatus.SELECTED:
+        slug = source_url_to_slug(record["source_url"])
+        url = record["candidate_url"]
+        status = record["candidate_status"]
+        include_in_pages = (status == CandidateStatus.SELECTED) or verbose_metadata
+        if include_in_pages and url not in seen_per_slug.get(slug, set()):
+            seen_per_slug.setdefault(slug, set()).add(url)
+            source_candidates.setdefault(slug, []).append(record)
+        if status != CandidateStatus.SELECTED:
             skipped_candidates += 1
             continue
-        url = record["candidate_url"]
         if url in seen_urls:
             skipped_candidates += 1
             continue
@@ -112,6 +121,7 @@ def run_generate_markdown_pages(
     markdown_files_written = 0
     source_folders_seen: set[str] = set()
     source_metadata_written: set[str] = set()
+    fetched_paths: dict[str, str | None] = {}
 
     with JsonlWriter(stage_paths.output_path) as out, \
          JsonlWriter(stage_paths.errors_path) as err:
@@ -141,15 +151,6 @@ def run_generate_markdown_pages(
             if source_slug not in source_metadata_written:
                 source_metadata_written.add(source_slug)
                 source_dir.mkdir(parents=True, exist_ok=True)
-                meta = {
-                    "source_slug": source_slug,
-                    "input_url": None,
-                    "normalized_url": None,
-                    "final_url": record.get("source_url"),
-                }
-                (source_dir / "source_metadata.json").write_text(
-                    json.dumps(meta, indent=2), encoding="utf-8"
-                )
 
             response = None
             error_type = None
@@ -162,6 +163,7 @@ def run_generate_markdown_pages(
                 error_type, exc = "fetch_error", e
 
             if error_type:
+                fetched_paths[url] = None
                 out.write({
                     "run_id": run_id,
                     "source_lead_id": lead_id,
@@ -193,6 +195,7 @@ def run_generate_markdown_pages(
                 continue
 
             if not _is_html(response.content_type):
+                fetched_paths[url] = None
                 non_html_count += 1
                 out.write({
                     "run_id": run_id,
@@ -224,6 +227,7 @@ def run_generate_markdown_pages(
             pages_fetched += 1
 
             rel_path_str = f"generated_wiki/sources/{source_slug}/{rel_path}"
+            fetched_paths[url] = str(rel_path)
             out.write({
                 "run_id": run_id,
                 "source_lead_id": lead_id,
@@ -241,6 +245,32 @@ def run_generate_markdown_pages(
                 "generated_at": generated_at,
             })
             output_count += 1
+
+    # --- Write source_metadata.json for each source after all fetching is done ---
+    for slug in source_metadata_written:
+        source_dir = wiki_dir / "sources" / slug
+        first = source_candidates[slug][0]
+        pages = [
+            {
+                "url": r["candidate_url"],
+                "link_text": r.get("link_text"),
+                "candidate_type": r["candidate_type"],
+                "candidate_status": r["candidate_status"],
+                "candidate_score": r.get("candidate_score"),
+                "markdown_path": fetched_paths.get(r["candidate_url"]),
+            }
+            for r in source_candidates[slug]
+        ]
+        meta = {
+            "source_slug": slug,
+            "input_url": first.get("input_url"),
+            "normalized_url": first.get("normalized_url"),
+            "final_url": first.get("source_url"),
+            "pages": pages,
+        }
+        (source_dir / "source_metadata.json").write_text(
+            json.dumps(meta, indent=2), encoding="utf-8"
+        )
 
     completed_at = datetime.now(timezone.utc).isoformat()
 

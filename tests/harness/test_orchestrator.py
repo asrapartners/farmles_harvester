@@ -98,6 +98,7 @@ class TestRunPipeline:
             "03_score_candidate_urls",
             "04_generate_markdown_pages",
             "05_strip_boilerplate_blocks",
+            "06_score_source_relevance",
         ]
 
     def test_writes_expected_artifacts(self, tmp_path):
@@ -123,6 +124,7 @@ class TestRunPipeline:
             "03_score_candidate_urls",
             "04_generate_markdown_pages",
             "05_strip_boilerplate_blocks",
+            "06_score_source_relevance",
         }
 
     def test_uses_fake_fetcher_no_real_network(self, tmp_path):

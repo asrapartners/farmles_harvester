@@ -214,6 +214,8 @@ def run_score_candidate_urls(
             "run_id": run_id,
             "source_lead_id": record["source_lead_id"],
             "source_url": record["source_url"],
+            "input_url": record.get("input_url"),
+            "normalized_url": record.get("normalized_url"),
             "candidate_url": record["discovered_url"],
             "link_text": record["link_text"],
             "candidate_type": result.candidate_type,
