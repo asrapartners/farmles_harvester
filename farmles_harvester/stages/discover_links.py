@@ -10,6 +10,7 @@ from farmles_harvester.models.record_contracts import (
 from farmles_harvester.pipeline.jsonl import JsonlWriter, stream_jsonl, write_json
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
+from farmles_harvester.registry.evaluation import evaluate_url_strength
 from farmles_harvester.stages.score_candidate_urls import LinkRecord, score_discovered_link
 from farmles_harvester.web.html_utils import extract_links_from_html
 from farmles_harvester.web.url_utils import is_internal_link, normalize_url
@@ -35,12 +36,16 @@ def run_discover_links(
     run_id: str,
     config: dict | None = None,
     fetcher=None,
+    registry=None,
 ) -> StageResult:
     started_at = datetime.now(timezone.utc).isoformat()
     cfg = config or {}
     max_depth = cfg.get("max_depth", 1)
     follow_threshold = cfg.get("follow_threshold", 40)
     per_source_follow_cap = cfg.get("per_source_follow_cap", 200)
+    fast_mode = cfg.get("fast_mode", False) and registry is not None
+    fast_url_min_strength = cfg.get("fast_url_min_strength", "strong")
+    fast_skip_permanent_failures = cfg.get("fast_skip_permanent_failures", True)
 
     processed_sources = 0
     skipped_sources = 0
@@ -52,6 +57,7 @@ def run_discover_links(
     output_count = 0
     error_count = 0
     capped_sources = 0
+    fast_skipped = 0
 
     queue: deque = deque()
     visited: set[str] = set()
@@ -159,6 +165,13 @@ def run_discover_links(
                         follow_allowed=True,
                     )
                     if score_discovered_link(link_rec, config=config).candidate_score >= follow_threshold:
+                        if fast_mode and not evaluate_url_strength(
+                            registry.get(discovered_url),
+                            min_strength=fast_url_min_strength,
+                            skip_permanent_failures=fast_skip_permanent_failures,
+                        ).should_process:
+                            fast_skipped += 1
+                            continue
                         queued = lead_queued.get(lead_id, 0)
                         if queued < per_source_follow_cap:
                             lead_queued[lead_id] = queued + 1
@@ -180,6 +193,7 @@ def run_discover_links(
         "error_records": error_count,
         "max_depth_reached": max_depth_reached,
         "capped_sources": capped_sources,
+        "fast_skipped": fast_skipped,
     }
 
     summary = {

@@ -57,6 +57,31 @@ def _make_seed(tmp_path: Path) -> Path:
     return seed
 
 
+class TestFastModeCrossRun:
+    def test_second_fast_run_skips_known_low_value_work(self, tmp_path):
+        seed = _make_seed(tmp_path)
+        shared_db = tmp_path / "registry.db"
+
+        # Run 1: full crawl, populates the shared registry.
+        run_pipeline(seed, "full", tmp_path / "runs1", fetcher=_make_fetcher(),
+                     registry_db=shared_db)
+
+        # Run 2: fast mode against the populated DB. Known medium/thin URLs are skipped.
+        config = {
+            "fast_mode": True,
+            "fast_url_min_strength": "strong",
+            "fast_md_min_words": 1000,
+            "fast_skip_permanent_failures": True,
+        }
+        run2_dir = run_pipeline(seed, "fast", tmp_path / "runs2", config=config,
+                                fetcher=_make_fetcher(), registry_db=shared_db)
+
+        manifest = read_manifest(run2_dir / "manifest.json")
+        stage_02 = manifest["stages"]["02_discover_links"]["counts"]
+        stage_04 = manifest["stages"]["04_generate_markdown_pages"]["counts"]
+        assert stage_02["fast_skipped"] + stage_04["fast_skipped"] > 0
+
+
 class TestRunPipeline:
     def test_creates_run_folder(self, tmp_path):
         seed = _make_seed(tmp_path)

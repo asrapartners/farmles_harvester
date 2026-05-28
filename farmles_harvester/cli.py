@@ -43,6 +43,8 @@ def _print_run_summary(run_dir: Path) -> None:
     selected      = c03.get("selected_count", 0)
     pages_written = c04.get("markdown_files_written", 0)
     pages_failed  = c04.get("pages_failed", 0)
+    fast_skip_02  = c02.get("fast_skipped", 0)
+    fast_skip_04  = c04.get("fast_skipped", 0)
 
     wiki_dir = run_dir / "generated_wiki"
     registry_db = manifest.get("registry_db", "")
@@ -52,6 +54,8 @@ def _print_run_summary(run_dir: Path) -> None:
     _console.print(f"  Output folder  : {wiki_dir}")
     if registry_db:
         _console.print(f"  Registry DB    : {registry_db}")
+    if fast_skip_02 or fast_skip_04:
+        _console.print(f"  Fast skipped   : {fast_skip_02} links, {fast_skip_04} pages")
     _console.print(f"  URLs crawled   : {urls_crawled}  (max depth reached: {max_depth})")
     _console.print(f"  Links found    : {links_found}  ({internal} internal, {external} external)")
     _console.print(f"  Candidates     : {selected} selected")
@@ -161,6 +165,16 @@ def main() -> None:
     parser.add_argument("--registry-db", type=Path, default=None, metavar="PATH",
                         help="Existing URL-registry SQLite DB to append to; "
                              "if omitted, a new url_registry.db is created in the run folder")
+    parser.add_argument("--fast", action="store_true",
+                        help="Fast mode: skip known low-value URLs using the registry "
+                             "(only useful with a populated --registry-db)")
+    parser.add_argument("--fast-url-min-strength", choices=["weak", "medium", "strong"],
+                        default="strong", metavar="LEVEL",
+                        help="In fast mode, recrawl a known URL only if its stored "
+                             "candidate strength is at least this (default: strong)")
+    parser.add_argument("--fast-md-min-words", type=int, default=150, metavar="N",
+                        help="In fast mode, regenerate a known page only if its prior "
+                             "markdown had at least this many words (default: 150)")
     args = parser.parse_args()
 
     if args.input_yaml and not args.category:
@@ -180,6 +194,10 @@ def main() -> None:
     config = {
         "max_depth": args.max_depth,
         "per_source_follow_cap": args.per_source_follow_cap,
+        "fast_mode": args.fast,
+        "fast_url_min_strength": args.fast_url_min_strength,
+        "fast_md_min_words": args.fast_md_min_words,
+        "fast_skip_permanent_failures": True,
     }
 
     state = {"stage_label": "Starting", "fetch_count": 0}

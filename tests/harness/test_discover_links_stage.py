@@ -56,6 +56,50 @@ def _html_fetcher(*urls: str, html: str = APEX_HTML) -> FakeFetcher:
     })
 
 
+class _StubRegistry:
+    def __init__(self, weak_substrings):
+        self._weak = weak_substrings
+
+    def get(self, url):
+        for s in self._weak:
+            if s in url:
+                return {"candidate_strength": "weak", "last_outcome_class": None, "retry_posture": None}
+        return None
+
+
+class TestFastModeGating:
+    def test_skips_known_weak_links_keeps_new(self, tmp_path):
+        vendors_url = "https://apex.example/vendors"
+        visit_url = "https://apex.example/visit"
+        input_path = _make_input(tmp_path, [_validated_record(SOURCE_URL)])
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(SOURCE_URL, visit_url)
+        run_discover_links(
+            input_path, paths, RUN_ID, fetcher=fetcher,
+            config={"max_depth": 2, "fast_mode": True, "fast_url_min_strength": "strong"},
+            registry=_StubRegistry(["vendors"]),
+        )
+        # /vendors is known-weak → never crawled; /visit is new → crawled at depth 2.
+        assert vendors_url not in fetcher.requested_urls
+        assert visit_url in fetcher.requested_urls
+        summary = json.loads(paths.summary_path.read_text())
+        assert summary["fast_skipped"] == 1
+
+    def test_no_gating_without_fast_mode(self, tmp_path):
+        vendors_url = "https://apex.example/vendors"
+        input_path = _make_input(tmp_path, [_validated_record(SOURCE_URL)])
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(SOURCE_URL, vendors_url, "https://apex.example/visit")
+        run_discover_links(
+            input_path, paths, RUN_ID, fetcher=fetcher,
+            config={"max_depth": 2},
+            registry=_StubRegistry(["vendors"]),
+        )
+        assert vendors_url in fetcher.requested_urls
+        summary = json.loads(paths.summary_path.read_text())
+        assert summary["fast_skipped"] == 0
+
+
 class TestRunDiscoverLinks:
     def test_writes_standard_artifacts(self, tmp_path):
         input_path = _make_input(tmp_path, [_validated_record(SOURCE_URL)])

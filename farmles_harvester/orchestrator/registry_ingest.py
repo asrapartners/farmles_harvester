@@ -122,6 +122,7 @@ def ingest_markdown_outcomes(
         registry.record_markdown_outcome(
             url,
             status="generated",
+            word_count=rec.get("markdown_word_count"),
             path=rec.get("markdown_path"),
             run_id=run_id,
         )

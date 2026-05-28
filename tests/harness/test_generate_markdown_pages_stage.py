@@ -293,6 +293,56 @@ class TestRunGenerateMarkdownPages:
         assert not registry.exists()
 
 
+class _StubRegistry:
+    def __init__(self, rows: dict[str, dict]):
+        self._rows = rows
+
+    def get_many(self, urls):
+        return {u: self._rows[u] for u in urls if u in self._rows}
+
+
+class TestFastModeGating:
+    def test_skips_known_thin_pages_keeps_new_and_strong(self, tmp_path):
+        thin_url = f"{SOURCE_URL}thin"
+        strong_url = f"{SOURCE_URL}strong"
+        new_url = f"{SOURCE_URL}new"
+        records = [
+            _candidate(thin_url, "vendor_page"),
+            _candidate(strong_url, "vendor_page"),
+            _candidate(new_url, "vendor_page"),
+        ]
+        registry = _StubRegistry({
+            thin_url: {"markdown_word_count": 10, "last_outcome_class": "ok", "retry_posture": None},
+            strong_url: {"markdown_word_count": 500, "last_outcome_class": "ok", "retry_posture": None},
+        })
+        input_path = _make_input(tmp_path, records)
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(**{strong_url: VENDOR_HTML, new_url: VENDOR_HTML})
+        run_generate_markdown_pages(
+            input_path, paths, RUN_ID, fetcher=fetcher,
+            config={"fast_mode": True, "fast_md_min_words": 150},
+            registry=registry,
+        )
+        assert thin_url not in fetcher.requested_urls
+        assert set(fetcher.requested_urls) == {strong_url, new_url}
+        summary = json.loads(paths.summary_path.read_text())
+        assert summary["fast_skipped"] == 1
+        assert summary["selected_candidates"] == 2
+
+    def test_no_gating_when_fast_mode_off(self, tmp_path):
+        thin_url = f"{SOURCE_URL}thin"
+        registry = _StubRegistry({
+            thin_url: {"markdown_word_count": 10, "last_outcome_class": "ok", "retry_posture": None},
+        })
+        input_path = _make_input(tmp_path, [_candidate(thin_url, "vendor_page")])
+        paths = _make_paths(tmp_path)
+        fetcher = _html_fetcher(**{thin_url: VENDOR_HTML})
+        run_generate_markdown_pages(input_path, paths, RUN_ID, fetcher=fetcher, registry=registry)
+        assert thin_url in fetcher.requested_urls
+        summary = json.loads(paths.summary_path.read_text())
+        assert summary["fast_skipped"] == 0
+
+
 _SHARED_NAV = "<nav><a href='/a'>SiteMenuA</a><a href='/b'>SiteMenuB</a><a href='/c'>SiteMenuC</a></nav>"
 _SHARED_FOOTER = "<footer>Copyright ACME Corp. All rights reserved.</footer>"
 

@@ -106,6 +106,7 @@ def run_pipeline(
             run_id=run_id,
             config=config,
             fetcher=fetcher,
+            registry=registry,
         ))
 
         paths_03 = StagePaths.for_stage(run_dir, "03", "candidate_urls")
@@ -131,6 +132,7 @@ def run_pipeline(
             run_id=run_id,
             config=config,
             fetcher=fetcher,
+            registry=registry,
         ))
         _safe_ingest(
             "fetch outcomes",

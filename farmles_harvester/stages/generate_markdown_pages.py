@@ -12,6 +12,7 @@ from farmles_harvester.models.record_contracts import CANDIDATE_URL_REQUIRED, mi
 from farmles_harvester.pipeline.jsonl import JsonlWriter, stream_jsonl, write_json
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
+from farmles_harvester.registry.evaluation import evaluate_markdown_strength
 from farmles_harvester.web.fetcher import FetchTimeoutError
 from farmles_harvester.web.html_cleaner import clean_html
 from farmles_harvester.web.url_utils import source_url_to_slug
@@ -72,11 +73,15 @@ def run_generate_markdown_pages(
     run_id: str,
     config: dict | None = None,
     fetcher=None,
+    registry=None,
 ) -> StageResult:
     started_at = datetime.now(timezone.utc).isoformat()
     wiki_dir = stage_paths.output_path.parent / "generated_wiki"
     cfg = config or {}
     verbose_metadata = cfg.get("verbose_metadata", False)
+    fast_mode = cfg.get("fast_mode", False) and registry is not None
+    fast_md_min_words = cfg.get("fast_md_min_words", 150)
+    fast_skip_permanent_failures = cfg.get("fast_skip_permanent_failures", True)
 
     # --- Phase 1: collect valid, selected, deduplicated records ---
     all_records = list(stream_jsonl(input_path))
@@ -84,6 +89,7 @@ def run_generate_markdown_pages(
 
     invalid_records: list[dict] = []
     skipped_candidates = 0
+    fast_skipped = 0
     selected_records: list[dict] = []
     seen_urls: set[str] = set()
     source_candidates: dict[str, list[dict]] = {}
@@ -109,6 +115,21 @@ def run_generate_markdown_pages(
             continue
         seen_urls.add(url)
         selected_records.append(record)
+
+    if fast_mode and selected_records:
+        known = registry.get_many([r["candidate_url"] for r in selected_records])
+        kept: list[dict] = []
+        for record in selected_records:
+            verdict = evaluate_markdown_strength(
+                known.get(record["candidate_url"]),
+                min_word_count=fast_md_min_words,
+                skip_permanent_failures=fast_skip_permanent_failures,
+            )
+            if verdict.should_process:
+                kept.append(record)
+            else:
+                fast_skipped += 1
+        selected_records = kept
 
     selected_candidates = len(selected_records)
     error_count = len(invalid_records)
@@ -240,6 +261,7 @@ def run_generate_markdown_pages(
                 "content_type": response.content_type,
                 "markdown_path": rel_path_str,
                 "markdown_filename": rel_path.name,
+                "markdown_word_count": len(markdown_text.split()),
                 "content_hash": compute_content_hash(markdown_text),
                 "content_retention_ratio": round(content_retention, 4),
                 "generated_at": generated_at,
@@ -278,6 +300,7 @@ def run_generate_markdown_pages(
         "input_records": input_count,
         "selected_candidates": selected_candidates,
         "skipped_candidates": skipped_candidates,
+        "fast_skipped": fast_skipped,
         "pages_fetched": pages_fetched,
         "pages_failed": pages_failed,
         "non_html_count": non_html_count,
