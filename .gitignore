@@ -12,6 +12,11 @@ seeds/*
 runs/*
 !runs/.gitkeep
 
+# URL registry (SQLite + WAL/SHM)
+data/url_registry.sqlite
+data/url_registry.sqlite-wal
+data/url_registry.sqlite-shm
+
 # OS/editor
 .DS_Store
 .vscode/
