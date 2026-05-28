@@ -10,9 +10,16 @@ from farmles_harvester.orchestrator.manifest import (
     record_stage_result,
     write_manifest,
 )
-from farmles_harvester.pipeline.jsonl import read_jsonl
+from farmles_harvester.orchestrator.registry_ingest import (
+    ingest_fetch_outcomes,
+    ingest_markdown_outcomes,
+    ingest_source_relevance,
+    ingest_urls,
+)
+from farmles_harvester.pipeline.jsonl import read_jsonl, stream_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
+from farmles_harvester.registry.url_registry import UrlRegistry
 from farmles_harvester.stages.discover_links import run_discover_links
 from farmles_harvester.stages.generate_markdown_pages import run_generate_markdown_pages
 from farmles_harvester.stages.normalize_source_leads import run_normalize_source_leads
@@ -20,6 +27,7 @@ from farmles_harvester.stages.score_candidate_urls import run_score_candidate_ur
 from farmles_harvester.stages.score_source_relevance import run_score_source_relevance
 from farmles_harvester.stages.strip_boilerplate_blocks import run_strip_boilerplate_blocks
 from farmles_harvester.stages.validate_urls import run_validate_urls
+from farmles_harvester.web.url_utils import source_url_to_slug
 
 
 def run_pipeline(
@@ -29,6 +37,7 @@ def run_pipeline(
     config: dict | None = None,
     fetcher=None,
     on_stage_start: Callable[[str, str], None] | None = None,
+    registry_db: Path | None = None,
 ) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
     run_id = f"{timestamp}_{tag}"
@@ -41,6 +50,8 @@ def run_pipeline(
     seed_snapshot = run_dir / "seed_urls.txt"
     shutil.copy2(seed_file, seed_snapshot)
 
+    registry_path = registry_db if registry_db is not None else run_dir / "url_registry.db"
+
     created_at = datetime.now(timezone.utc).isoformat()
     manifest = create_initial_manifest(
         run_id=run_id,
@@ -48,6 +59,7 @@ def run_pipeline(
         seed_file_snapshot=str(seed_file),
         created_at=created_at,
     )
+    manifest["registry_db"] = str(registry_path)
     manifest_path = run_dir / "manifest.json"
     write_manifest(manifest_path, manifest)
 
@@ -65,75 +77,121 @@ def run_pipeline(
         if on_stage_start:
             on_stage_start(stage_id, label)
 
-    paths_00 = StagePaths.for_stage(run_dir, "00", "normalized_source_leads")
-    _notify("00_normalize_source_leads", "Normalising seeds")
-    _record_and_check(run_normalize_source_leads(
-        input_path=seed_snapshot,
-        stage_paths=paths_00,
-        run_id=run_id,
-        config=config,
-    ))
+    registry = UrlRegistry(registry_path)
+    try:
+        paths_00 = StagePaths.for_stage(run_dir, "00", "normalized_source_leads")
+        _notify("00_normalize_source_leads", "Normalising seeds")
+        _record_and_check(run_normalize_source_leads(
+            input_path=seed_snapshot,
+            stage_paths=paths_00,
+            run_id=run_id,
+            config=config,
+        ))
 
-    paths_01 = StagePaths.for_stage(run_dir, "01", "validated_sources")
-    _notify("01_validate_urls", "Validating")
-    _record_and_check(run_validate_urls(
-        input_path=paths_00.output_path,
-        stage_paths=paths_01,
-        run_id=run_id,
-        config=config,
-        fetcher=fetcher,
-    ))
+        paths_01 = StagePaths.for_stage(run_dir, "01", "validated_sources")
+        _notify("01_validate_urls", "Validating")
+        _record_and_check(run_validate_urls(
+            input_path=paths_00.output_path,
+            stage_paths=paths_01,
+            run_id=run_id,
+            config=config,
+            fetcher=fetcher,
+        ))
 
-    paths_02 = StagePaths.for_stage(run_dir, "02", "discovered_links")
-    _notify("02_discover_links", "Crawling")
-    _record_and_check(run_discover_links(
-        input_path=paths_01.output_path,
-        stage_paths=paths_02,
-        run_id=run_id,
-        config=config,
-        fetcher=fetcher,
-    ))
+        paths_02 = StagePaths.for_stage(run_dir, "02", "discovered_links")
+        _notify("02_discover_links", "Crawling")
+        _record_and_check(run_discover_links(
+            input_path=paths_01.output_path,
+            stage_paths=paths_02,
+            run_id=run_id,
+            config=config,
+            fetcher=fetcher,
+        ))
 
-    paths_03 = StagePaths.for_stage(run_dir, "03", "candidate_urls")
-    _notify("03_score_candidate_urls", "Scoring")
-    _record_and_check(run_score_candidate_urls(
-        input_path=paths_02.output_path,
-        stage_paths=paths_03,
-        run_id=run_id,
-        config=config,
-    ))
+        paths_03 = StagePaths.for_stage(run_dir, "03", "candidate_urls")
+        _notify("03_score_candidate_urls", "Scoring")
+        _record_and_check(run_score_candidate_urls(
+            input_path=paths_02.output_path,
+            stage_paths=paths_03,
+            run_id=run_id,
+            config=config,
+        ))
+        _safe_ingest(
+            "urls",
+            lambda: ingest_urls(registry, paths_02.output_path, paths_03.output_path, run_id),
+        )
 
-    paths_04 = StagePaths.for_stage(run_dir, "04", "markdown_pages")
-    _notify("04_generate_markdown_pages", "Generating pages")
-    _record_and_check(run_generate_markdown_pages(
-        input_path=paths_03.output_path,
-        stage_paths=paths_04,
-        run_id=run_id,
-        config=config,
-        fetcher=fetcher,
-    ))
+        slug_to_source_url = _build_slug_map(paths_03.output_path)
 
-    paths_05 = StagePaths.for_stage(run_dir, "05", "stripped_pages")
-    _notify("05_strip_boilerplate_blocks", "Stripping boilerplate")
-    _record_and_check(run_strip_boilerplate_blocks(
-        input_path=paths_04.output_path,
-        stage_paths=paths_05,
-        run_id=run_id,
-        config=config,
-    ))
+        paths_04 = StagePaths.for_stage(run_dir, "04", "markdown_pages")
+        _notify("04_generate_markdown_pages", "Generating pages")
+        _record_and_check(run_generate_markdown_pages(
+            input_path=paths_03.output_path,
+            stage_paths=paths_04,
+            run_id=run_id,
+            config=config,
+            fetcher=fetcher,
+        ))
+        _safe_ingest(
+            "fetch outcomes",
+            lambda: ingest_fetch_outcomes(
+                registry, paths_04.output_path, paths_02.errors_path, run_id
+            ),
+        )
+        _safe_ingest(
+            "markdown outcomes",
+            lambda: ingest_markdown_outcomes(registry, paths_04.output_path, run_id),
+        )
 
-    paths_06 = StagePaths.for_stage(run_dir, "06", "source_relevance")
-    _notify("06_score_source_relevance", "Scoring source relevance")
-    result_06 = run_score_source_relevance(
-        input_path=paths_05.output_path,
-        stage_paths=paths_06,
-        run_id=run_id,
-        config=config,
-    )
-    _record_and_check(result_06)
-    _print_relevance_summary(paths_06.output_path)
+        paths_05 = StagePaths.for_stage(run_dir, "05", "stripped_pages")
+        _notify("05_strip_boilerplate_blocks", "Stripping boilerplate")
+        _record_and_check(run_strip_boilerplate_blocks(
+            input_path=paths_04.output_path,
+            stage_paths=paths_05,
+            run_id=run_id,
+            config=config,
+        ))
+
+        paths_06 = StagePaths.for_stage(run_dir, "06", "source_relevance")
+        _notify("06_score_source_relevance", "Scoring source relevance")
+        result_06 = run_score_source_relevance(
+            input_path=paths_05.output_path,
+            stage_paths=paths_06,
+            run_id=run_id,
+            config=config,
+        )
+        _record_and_check(result_06)
+        _safe_ingest(
+            "source relevance",
+            lambda: ingest_source_relevance(
+                registry, paths_06.output_path, slug_to_source_url, run_id
+            ),
+        )
+        _print_relevance_summary(paths_06.output_path)
+    finally:
+        registry.close()
 
     return run_dir
+
+
+def _build_slug_map(candidate_path: Path) -> dict[str, str]:
+    slug_to_source_url: dict[str, str] = {}
+    if not candidate_path.exists():
+        return slug_to_source_url
+    for rec in stream_jsonl(candidate_path):
+        source_url = rec.get("source_url")
+        if not source_url:
+            continue
+        slug = source_url_to_slug(source_url)
+        slug_to_source_url.setdefault(slug, source_url)
+    return slug_to_source_url
+
+
+def _safe_ingest(label: str, fn: Callable[[], None]) -> None:
+    try:
+        fn()
+    except Exception as exc:
+        print(f"[registry] warning: failed to ingest {label}: {exc}")
 
 
 def _print_relevance_summary(relevance_jsonl: Path) -> None:

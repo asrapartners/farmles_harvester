@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -147,9 +148,12 @@ def _print_stage_timings(manifest: dict) -> None:
         if stage is None:
             _console.print(f"  [dim]{label:<32}  —[/dim]")
             continue
+        status = stage.get("status", "")
+        if "completed_at" not in stage:
+            _console.print(f"  [yellow]{label:<32}[/yellow]  {'in-progress':>8}")
+            continue
         dur = _fmt_s(_duration_s(stage["started_at"], stage["completed_at"]))
         one_liner = _stage_one_liner(stage_id, stage.get("counts", {}))
-        status = stage.get("status", "")
         color = "green" if status == "completed" else "red"
         _console.print(f"  [{color}]{label:<32}[/{color}]  {dur:>8}   {one_liner}")
 
@@ -210,8 +214,6 @@ def _print_source_relevance(manifest: dict, run_dir: Path) -> None:
     if not stage:
         return
     c = stage.get("counts", {})
-    jsonl_path = run_dir / "06_source_relevance.jsonl"
-    records = _read_jsonl(jsonl_path)
 
     _console.print()
     _console.print("── Source Relevance  (stage 06) ──────────────────────────────")
@@ -224,26 +226,8 @@ def _print_source_relevance(manifest: dict, run_dir: Path) -> None:
     }
     for label in label_order:
         n = c.get(key_map[label], 0)
-        note = "   ← not a farmer's market, skip next run" if label == "low_confidence" and n else ""
         color = "red" if label == "low_confidence" else ("yellow" if label == "uncertain" else "green")
-        _console.print(f"  [{color}]{label:<20}[/{color}]  {n}{note}")
-
-    low_conf = [r for r in records if r.get("relevance_label") == "low_confidence"]
-    if low_conf:
-        _console.print()
-        _console.print("  [red]Low-confidence sources[/red] (remove from seed list or investigate):")
-        for r in sorted(low_conf, key=lambda x: x["source_slug"]):
-            hits = r.get("keyword_hits", 0)
-            words = r.get("total_word_count", 0)
-            slug = r["source_slug"]
-            meta_path = run_dir / "generated_wiki" / "sources" / slug / "source_metadata.json"
-            url = ""
-            if meta_path.exists():
-                try:
-                    url = json.loads(meta_path.read_text(encoding="utf-8")).get("final_url", "")
-                except Exception:
-                    pass
-            _console.print(f"    [red]•[/red] {slug:<50}  {url}  ({hits} hits, {words} words)")
+        _console.print(f"  [{color}]{label:<20}[/{color}]  {n}")
 
 
 def _print_next_run_candidates(manifest: dict, run_dir: Path) -> None:
@@ -269,18 +253,9 @@ def _print_next_run_candidates(manifest: dict, run_dir: Path) -> None:
     total = sum(len(v) for v in failures.values())
     _console.print()
     _console.print("── Next-run candidates  (stage 01 failures) ──────────────────")
-    _console.print("  These sources failed validation and were skipped entirely.")
-    _console.print("  Retry, fix, or remove from the seed file.")
     for status in sorted(failures):
-        urls = failures[status]
-        _console.print()
-        _console.print(f"  [yellow]{status}[/yellow]  ({len(urls)})")
-        for url in urls[:5]:
-            _console.print(f"    • {url}")
-        if len(urls) > 5:
-            _console.print(f"    [dim]… and {len(urls) - 5} more[/dim]")
-    _console.print()
-    _console.print(f"  Total: [bold]{total}[/bold] sources to review")
+        _console.print(f"  [yellow]{status:<20}[/yellow]  {len(failures[status])}")
+    _console.print(f"  [bold]total[/bold]{'':16}  {total}")
 
 
 def _print_errors(manifest: dict, run_dir: Path) -> None:
@@ -288,7 +263,6 @@ def _print_errors(manifest: dict, run_dir: Path) -> None:
     _console.print()
     _console.print("── Errors ────────────────────────────────────────────────────")
 
-    any_errors = False
     for stage_id in _STAGE_ORDER:
         stage = stages.get(stage_id)
         if not stage:
@@ -301,27 +275,238 @@ def _print_errors(manifest: dict, run_dir: Path) -> None:
             _console.print(f"  [dim]{label}  0 errors[/dim]")
             continue
 
-        any_errors = True
         retryable = sum(1 for e in errors if e.get("retryable"))
         retryable_note = f"  ({retryable} retryable)" if retryable else ""
         _console.print(f"  [yellow]{label}  {len(errors)} errors{retryable_note}[/yellow]")
-
-        for err in errors[:10]:
-            etype = err.get("error_type", "error")
-            url = err.get("source_url") or err.get("candidate_url") or err.get("discovered_url") or ""
-            msg = err.get("message", "")
-            if len(msg) > 80:
-                msg = msg[:77] + "..."
-            retryable_tag = "  [dim](retryable)[/dim]" if err.get("retryable") else ""
-            url_part = f"  {url}" if url else ""
-            _console.print(f"    [[dim]{etype}[/dim]]{url_part}  — {msg}{retryable_tag}")
-
-        if len(errors) > 10:
-            _console.print(f"    [dim]… and {len(errors) - 10} more[/dim]")
-
-    if not any_errors:
-        pass  # already printed "0 errors" inline
     _console.print()
+
+
+_STATS_STAGE_FILES: list[tuple[str, str]] = [
+    ("stage02", "02_discovered_links.jsonl"),
+    ("stage03", "03_candidate_urls.jsonl"),
+    ("stage04", "04_markdown_pages.jsonl"),
+]
+
+
+def _fmt_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.2f} MB"
+
+
+def _build_seed_stats(run_dir: Path) -> tuple[list[dict], dict[str, int]]:
+    leads = _read_jsonl(run_dir / "00_normalized_source_leads.jsonl")
+    if not leads:
+        return [], {}
+
+    seed_url: dict[str, str] = {r["source_lead_id"]: r.get("input_url", "") for r in leads}
+    order: list[str] = [r["source_lead_id"] for r in leads]
+
+    validated = _read_jsonl(run_dir / "01_validated_sources.jsonl")
+    lead_validated: dict[str, int] = {
+        r["source_lead_id"]: 1
+        for r in validated
+        if r.get("validation_status") in _VALIDATION_SUCCESS
+    }
+
+    raw_totals: dict[str, int] = {}
+    per_stage_counts: dict[str, Counter] = {}
+    for col, fname in _STATS_STAGE_FILES:
+        c: Counter = Counter()
+        rows_seen = 0
+        for r in _read_jsonl(run_dir / fname):
+            rows_seen += 1
+            lid = r.get("source_lead_id")
+            if lid:
+                if col == "stage04" and r.get("fetch_status") != "fetched":
+                    continue
+                c[lid] += 1
+        per_stage_counts[col] = c
+        raw_totals[col] = rows_seen
+
+    # lead → slug from stage 04 (first slug seen wins; one per lead in practice)
+    lead_to_slug: dict[str, str] = {}
+    md_bytes_by_lead: Counter = Counter()
+    seen_md_paths: set[str] = set()
+    for r in _read_jsonl(run_dir / "04_markdown_pages.jsonl"):
+        lid = r.get("source_lead_id")
+        slug = r.get("source_slug")
+        if lid and slug and lid not in lead_to_slug:
+            lead_to_slug[lid] = slug
+        if lid and r.get("fetch_status") == "fetched":
+            mdp = r.get("markdown_path")
+            if mdp and mdp not in seen_md_paths:
+                seen_md_paths.add(mdp)
+                p = run_dir / mdp
+                if p.exists():
+                    md_bytes_by_lead[lid] += p.stat().st_size
+
+    slug_to_lead: dict[str, str] = {s: l for l, s in lead_to_slug.items()}
+
+    stage05_by_lead: Counter = Counter()
+    for r in _read_jsonl(run_dir / "05_stripped_pages.jsonl"):
+        if not r.get("modified"):
+            continue
+        slug = r.get("source_slug", "")
+        lid = slug_to_lead.get(slug)
+        if lid:
+            stage05_by_lead[lid] += 1
+
+    stage06_by_lead: Counter = Counter()
+    stage06_rows = 0
+    for r in _read_jsonl(run_dir / "06_source_relevance.jsonl"):
+        stage06_rows += 1
+        slug = r.get("source_slug", "")
+        lid = slug_to_lead.get(slug)
+        if lid:
+            stage06_by_lead[lid] += 1
+    raw_totals["stage06"] = stage06_rows
+
+    rows: list[dict] = []
+    for lid in order:
+        rows.append({
+            "seed_url": seed_url.get(lid, ""),
+            "source_lead_id": lid,
+            "stage00": 1,
+            "stage01": lead_validated.get(lid, 0),
+            "stage02": per_stage_counts["stage02"].get(lid, 0),
+            "stage03": per_stage_counts["stage03"].get(lid, 0),
+            "stage04": per_stage_counts["stage04"].get(lid, 0),
+            "stage05": stage05_by_lead.get(lid, 0),
+            "stage06": stage06_by_lead.get(lid, 0),
+            "md_size": md_bytes_by_lead.get(lid, 0),
+        })
+    return rows, raw_totals
+
+
+_STATS_CSV_COLUMNS = [
+    "seed_url", "source_lead_id",
+    "stage00", "stage01", "stage02", "stage03", "stage04", "stage05", "stage06",
+    "md_size",
+]
+
+
+def _write_stats_csv(seed_stats: list[dict], output_path: Path) -> None:
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_STATS_CSV_COLUMNS)
+        w.writeheader()
+        for row in seed_stats:
+            w.writerow(row)
+
+
+def _print_top_seeds(seed_stats: list[dict]) -> None:
+    if not seed_stats:
+        return
+
+    by_urls = sorted(
+        seed_stats,
+        key=lambda r: (-(r["stage02"] + r["stage03"]), r["seed_url"]),
+    )
+    by_urls = [r for r in by_urls if (r["stage02"] + r["stage03"]) > 0][:3]
+
+    by_md = sorted(
+        seed_stats,
+        key=lambda r: (-r["md_size"], r["seed_url"]),
+    )
+    by_md = [r for r in by_md if r["md_size"] > 0][:3]
+
+    if not by_urls and not by_md:
+        return
+
+    _console.print()
+    _console.print("── Top seeds ─────────────────────────────────────────────────")
+    if by_urls:
+        _console.print("  By URLs generated (stage02 + stage03):")
+        for i, r in enumerate(by_urls, 1):
+            n = r["stage02"] + r["stage03"]
+            _console.print(f"    {i}.  {n:>5}   {r['seed_url']}")
+    if by_md:
+        _console.print("  By markdown bytes:")
+        for i, r in enumerate(by_md, 1):
+            _console.print(f"    {i}.  {_fmt_bytes(r['md_size']):>9}   {r['seed_url']}")
+
+
+def _print_reconciliation(
+    seed_stats: list[dict],
+    raw_totals: dict[str, int],
+    manifest: dict,
+    run_dir: Path,
+    verify_md_bytes: bool = False,
+) -> None:
+    stages = manifest.get("stages", {})
+
+    def stage_completed(stage_id: str) -> bool:
+        s = stages.get(stage_id)
+        return bool(s and s.get("status") == "completed")
+
+    # (label, sum-from-per-seed-rows, authority)
+    checks: list[tuple[str, int, int]] = []
+
+    # stage01 sum vs manifest counts
+    if stage_completed("01_validate_urls"):
+        c = stages["01_validate_urls"].get("counts", {})
+        authority = c.get("valid_count", 0) + c.get("redirected_count", 0)
+        total = sum(r["stage01"] for r in seed_stats)
+        checks.append(("stage01 sum", total, authority))
+
+    # stage02 sum vs total rows seen in 02_discovered_links.jsonl
+    if stage_completed("02_discover_links"):
+        total = sum(r["stage02"] for r in seed_stats)
+        checks.append(("stage02 sum", total, raw_totals.get("stage02", 0)))
+
+    # stage03 sum vs total rows seen in 03_candidate_urls.jsonl
+    if stage_completed("03_score_candidate_urls"):
+        total = sum(r["stage03"] for r in seed_stats)
+        checks.append(("stage03 sum", total, raw_totals.get("stage03", 0)))
+
+    # stage04 sum vs manifest markdown_files_written
+    if stage_completed("04_generate_markdown_pages"):
+        authority = stages["04_generate_markdown_pages"].get("counts", {}).get("markdown_files_written", 0)
+        total = sum(r["stage04"] for r in seed_stats)
+        checks.append(("stage04 sum", total, authority))
+
+    # stage06 sum vs total rows seen in 06_source_relevance.jsonl
+    if stage_completed("06_score_source_relevance"):
+        total = sum(r["stage06"] for r in seed_stats)
+        checks.append(("stage06 sum", total, raw_totals.get("stage06", 0)))
+
+    # md bytes — independent filesystem walk (catches orphan/untracked .md files).
+    # Opt-in: rglob over the wiki tree is slow on networked/WSL filesystems.
+    if verify_md_bytes and stage_completed("04_generate_markdown_pages"):
+        wiki_sources = run_dir / "generated_wiki" / "sources"
+        fs_bytes = 0
+        if wiki_sources.exists():
+            for p in wiki_sources.rglob("*.md"):
+                fs_bytes += p.stat().st_size
+        total_bytes = sum(r["md_size"] for r in seed_stats)
+        checks.append(("md bytes sum", total_bytes, fs_bytes))
+
+    skipped = [
+        s for s in [
+            "01_validate_urls", "02_discover_links", "03_score_candidate_urls",
+            "04_generate_markdown_pages", "06_score_source_relevance",
+        ]
+        if not stage_completed(s)
+    ]
+
+    _console.print()
+    _console.print("── Reconciliation ────────────────────────────────────────────")
+    if skipped:
+        labels = ", ".join(_STAGE_LABELS.get(s, s) for s in skipped)
+        _console.print(f"  [dim]Skipped {len(skipped)} stages (not yet completed): {labels}[/dim]")
+    for label, total, authority in checks:
+        is_bytes = label.startswith("md bytes")
+        fmt = _fmt_bytes if is_bytes else (lambda n: f"{n:,}")
+        if total == authority:
+            _console.print(f"  [green]{label:<14} ✓[/green] {fmt(total)} = {fmt(authority)}")
+        else:
+            delta = total - authority
+            _console.print(
+                f"  [yellow]{label:<14} ⚠[/yellow] {fmt(total)} ≠ {fmt(authority)}   "
+                f"(delta {delta:+,})"
+            )
 
 
 _INVALID_SUB_KEYS = ["not_found", "forbidden", "server_error", "redirect", "timeout", "fetch_error", "non_html", "other"]
@@ -468,13 +653,26 @@ def main() -> None:
         choices=["ok", "suspect", "invalid"],
         help="Limit YAML output to these categories: ok, suspect, invalid",
     )
+    parser.add_argument(
+        "--stats-csv",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Also write per-seed-URL stage stats CSV to this file",
+    )
+    parser.add_argument(
+        "--verify-md-bytes",
+        action="store_true",
+        help="Reconcile per-seed markdown bytes against a full filesystem walk "
+             "(slow on networked/WSL filesystems)",
+    )
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir or _find_most_recent_run(args.runs_dir)
 
     manifest_path = run_dir / "manifest.json"
     if not manifest_path.exists():
-        _console.print(f"[red]No manifest.json found in {run_dir}[/red]")
+        _console.print(f"[red]Run not started or manifest not yet written: {run_dir}[/red]")
         raise SystemExit(1)
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -488,11 +686,19 @@ def main() -> None:
     _print_next_run_candidates(manifest, run_dir)
     _print_errors(manifest, run_dir)
 
+    seed_stats, raw_totals = _build_seed_stats(run_dir)
+    _print_top_seeds(seed_stats)
+    _print_reconciliation(seed_stats, raw_totals, manifest, run_dir, args.verify_md_bytes)
+
     classified = _classify_urls(manifest, run_dir)
     _print_url_status_summary(classified)
     only_set = set(args.only) if args.only else None
     _write_url_yaml(classified, args.output, only_set)
     _console.print(f"[green]URL status written to:[/green] {args.output}")
+
+    if args.stats_csv is not None:
+        _write_stats_csv(seed_stats, args.stats_csv)
+        _console.print(f"[green]Per-seed stats written to:[/green] {args.stats_csv}")
 
 
 if __name__ == "__main__":

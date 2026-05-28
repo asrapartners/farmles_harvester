@@ -45,10 +45,13 @@ def _print_run_summary(run_dir: Path) -> None:
     pages_failed  = c04.get("pages_failed", 0)
 
     wiki_dir = run_dir / "generated_wiki"
+    registry_db = manifest.get("registry_db", "")
 
     _console.print()
     _console.print("── Run summary ─────────────────────────────")
     _console.print(f"  Output folder  : {wiki_dir}")
+    if registry_db:
+        _console.print(f"  Registry DB    : {registry_db}")
     _console.print(f"  URLs crawled   : {urls_crawled}  (max depth reached: {max_depth})")
     _console.print(f"  Links found    : {links_found}  ({internal} internal, {external} external)")
     _console.print(f"  Candidates     : {selected} selected")
@@ -155,6 +158,9 @@ def main() -> None:
                         help="Link discovery depth (default: 10)")
     parser.add_argument("--per-source-follow-cap", type=int, default=200, metavar="N",
                         help="Max URLs queued for crawling per seed source (default: 200)")
+    parser.add_argument("--registry-db", type=Path, default=None, metavar="PATH",
+                        help="Existing URL-registry SQLite DB to append to; "
+                             "if omitted, a new url_registry.db is created in the run folder")
     args = parser.parse_args()
 
     if args.input_yaml and not args.category:
@@ -202,6 +208,7 @@ def main() -> None:
                 config=config,
                 fetcher=progress_fetcher,
                 on_stage_start=_on_stage_start,
+                registry_db=args.registry_db,
             )
         except PipelineError as e:
             status.stop()

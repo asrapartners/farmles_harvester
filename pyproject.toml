@@ -24,6 +24,7 @@ dev = [
 farmles_harvester = "farmles_harvester.cli:main"
 report_crawl = "farmles_harvester.cli_report:main"
 scan_relevance = "farmles_harvester.cli_scan_relevance:main"
+detect_render = "farmles_harvester.cli_detect_render:main"
 
 [tool.setuptools.packages.find]
 include = ["farmles_harvester*"]
