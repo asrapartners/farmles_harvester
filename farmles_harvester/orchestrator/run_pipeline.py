@@ -15,6 +15,7 @@ from farmles_harvester.orchestrator.registry_ingest import (
     ingest_markdown_outcomes,
     ingest_source_relevance,
     ingest_urls,
+    ingest_validation_failures,
 )
 from farmles_harvester.pipeline.jsonl import read_jsonl, stream_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
@@ -97,6 +98,11 @@ def run_pipeline(
             config=config,
             fetcher=fetcher,
         ))
+
+        _safe_ingest(
+            "validation failures",
+            lambda: ingest_validation_failures(registry, paths_01.output_path, run_id),
+        )
 
         paths_02 = StagePaths.for_stage(run_dir, "02", "discovered_links")
         _notify("02_discover_links", "Crawling")

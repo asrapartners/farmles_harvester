@@ -3,6 +3,7 @@ from farmles_harvester.orchestrator.registry_ingest import (
     ingest_markdown_outcomes,
     ingest_source_relevance,
     ingest_urls,
+    ingest_validation_failures,
 )
 from farmles_harvester.pipeline.jsonl import write_jsonl
 from farmles_harvester.registry import UrlRegistry
@@ -50,8 +51,30 @@ class TestIngestUrls:
             ingest_urls(reg, discovered, candidate, RUN_ID)
             row = reg.get("https://x.com/shared")
             assert row["times_seen"] == 1
-            assert row["source_url_count"] == 2
             assert set(reg.sources_of("https://x.com/shared")) == {"https://a.com/", "https://b.com/"}
+
+
+class TestIngestValidationFailures:
+    def test_fetch_error_recorded_as_permanent(self, tmp_path):
+        validated = tmp_path / "01.jsonl"
+        write_jsonl(validated, [
+            {"normalized_url": "https://dead.com/", "validation_status": "fetch_error",
+             "failure_reason": "DNS_PROBE_FINISHED_NXDOMAIN"},
+            {"normalized_url": "https://ok.com/", "validation_status": "valid"},
+        ])
+        with _registry(tmp_path) as reg:
+            ingest_validation_failures(reg, validated, RUN_ID)
+            row = reg.get("https://dead.com/")
+            assert row is not None
+            assert row["last_outcome_class"] == "connect_error"
+            assert row["retry_posture"] == "permanent"
+            assert row["consecutive_failures"] == 1
+            assert reg.get("https://ok.com/") is None
+
+    def test_missing_file_is_noop(self, tmp_path):
+        with _registry(tmp_path) as reg:
+            ingest_validation_failures(reg, tmp_path / "missing.jsonl", RUN_ID)
+            assert reg.count() == 0
 
 
 class TestIngestOutcomes:

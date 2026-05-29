@@ -3,9 +3,6 @@
 
 CREATE TABLE IF NOT EXISTS urls (
     url                     TEXT PRIMARY KEY,
-    source_url              TEXT NOT NULL,
-    source_lead_id          TEXT,
-    source_url_count        INTEGER NOT NULL DEFAULT 1,
     candidate_score         INTEGER,
     candidate_status        TEXT,
     candidate_strength      TEXT,
@@ -32,11 +29,10 @@ CREATE TABLE IF NOT EXISTS urls (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_urls_score      ON urls(candidate_score);
-CREATE INDEX IF NOT EXISTS idx_urls_status     ON urls(candidate_status);
-CREATE INDEX IF NOT EXISTS idx_urls_outcome    ON urls(last_outcome_class);
-CREATE INDEX IF NOT EXISTS idx_urls_posture    ON urls(retry_posture);
-CREATE INDEX IF NOT EXISTS idx_urls_source_url ON urls(source_url);
+CREATE INDEX IF NOT EXISTS idx_urls_score   ON urls(candidate_score);
+CREATE INDEX IF NOT EXISTS idx_urls_status  ON urls(candidate_status);
+CREATE INDEX IF NOT EXISTS idx_urls_outcome ON urls(last_outcome_class);
+CREATE INDEX IF NOT EXISTS idx_urls_posture ON urls(retry_posture);
 
 CREATE TABLE IF NOT EXISTS url_sources (
     url        TEXT NOT NULL,

@@ -11,6 +11,31 @@ _FETCH_STATUS_OUTCOME = {
 }
 
 
+def ingest_validation_failures(
+    registry: UrlRegistry,
+    validated_path: Path,
+    run_id: str,
+    now: str | None = None,
+) -> None:
+    if not validated_path.exists():
+        return
+    for rec in stream_jsonl(validated_path):
+        if rec.get("validation_status") != "fetch_error":
+            continue
+        url = rec.get("normalized_url")
+        if not url:
+            continue
+        registry.upsert({"url": url}, run_id=run_id, now=now)
+        registry.record_outcome(
+            url,
+            outcome_class="connect_error",
+            retry_posture="permanent",
+            detail=rec.get("failure_reason"),
+            run_id=run_id,
+            now=now,
+        )
+
+
 def ingest_urls(
     registry: UrlRegistry,
     discovered_path: Path,
@@ -44,7 +69,6 @@ def ingest_urls(
         if url not in representative:
             representative[url] = {
                 "source_url": source_url,
-                "source_lead_id": rec.get("source_lead_id"),
             }
             sources_by_url[url] = [source_url]
         elif source_url not in sources_by_url[url]:
@@ -55,7 +79,6 @@ def ingest_urls(
         row = {
             "url": url,
             "source_url": rep["source_url"],
-            "source_lead_id": rep["source_lead_id"],
             **candidate_fields.get(url, {}),
         }
         rows.append(row)

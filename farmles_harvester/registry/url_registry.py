@@ -61,6 +61,11 @@ class UrlRegistry:
     def _apply_schema(self) -> None:
         sql = _SCHEMA_PATH.read_text(encoding="utf-8")
         self._conn.executescript(sql)
+        for col in ("source_lead_id", "source_url", "source_url_count"):
+            try:
+                self._conn.execute(f"ALTER TABLE urls DROP COLUMN {col}")
+            except Exception:
+                pass
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()
@@ -197,18 +202,19 @@ class UrlRegistry:
         with self.transaction():
             for r in rows:
                 url = r["url"]
-                source_url = r["source_url"]
-                self._conn.execute(
-                    "INSERT OR IGNORE INTO url_sources(url, source_url) VALUES (?, ?)",
-                    (url, source_url),
-                )
+                source_url = r.get("source_url")
+                if source_url:
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO url_sources(url, source_url) VALUES (?, ?)",
+                        (url, source_url),
+                    )
                 self._conn.execute(
                     """
                     INSERT INTO urls (
-                        url, source_url, source_lead_id, source_url_count,
+                        url,
                         candidate_score, candidate_status, candidate_strength, candidate_type,
                         first_seen_at, last_seen_at, last_run_id, times_seen
-                    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 1)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                     ON CONFLICT(url) DO UPDATE SET
                         candidate_score    = excluded.candidate_score,
                         candidate_status   = excluded.candidate_status,
@@ -220,8 +226,6 @@ class UrlRegistry:
                     """,
                     (
                         url,
-                        source_url,
-                        r.get("source_lead_id"),
                         r.get("candidate_score"),
                         r.get("candidate_status"),
                         r.get("candidate_strength"),
@@ -230,14 +234,6 @@ class UrlRegistry:
                         ts,
                         run_id,
                     ),
-                )
-                self._conn.execute(
-                    """
-                    UPDATE urls SET source_url_count = (
-                        SELECT COUNT(*) FROM url_sources WHERE url_sources.url = urls.url
-                    ) WHERE url = ?
-                    """,
-                    (url,),
                 )
 
     def record_outcome(
@@ -375,14 +371,6 @@ class UrlRegistry:
             "INSERT OR IGNORE INTO url_sources(url, source_url) VALUES (?, ?)",
             (url, source_url),
         )
-        self._conn.execute(
-            """
-            UPDATE urls SET source_url_count = (
-                SELECT COUNT(*) FROM url_sources WHERE url_sources.url = urls.url
-            ) WHERE url = ?
-            """,
-            (url,),
-        )
 
     # ---- writes (sources) ----
 
@@ -465,15 +453,6 @@ class UrlRegistry:
     def delete_where(self, where: str, params: Iterable[Any] = ()) -> int:
         cur = self._conn.execute(f"DELETE FROM urls WHERE {where}", tuple(params))
         return cur.rowcount
-
-    def rebuild_source_url_count(self) -> None:
-        self._conn.execute(
-            """
-            UPDATE urls SET source_url_count = (
-                SELECT COUNT(*) FROM url_sources WHERE url_sources.url = urls.url
-            )
-            """
-        )
 
     def vacuum(self) -> None:
         self._conn.execute("VACUUM")

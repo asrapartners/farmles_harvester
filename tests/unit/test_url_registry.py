@@ -12,7 +12,6 @@ def _row(**overrides) -> dict:
     base = {
         "url": "https://example.com/page",
         "source_url": "https://example.com/",
-        "source_lead_id": "lead_1",
         "candidate_score": 65,
         "candidate_status": "selected",
         "candidate_strength": "medium",
@@ -43,13 +42,10 @@ class TestInsertPath:
         with UrlRegistry(tmp_path / "r.sqlite") as reg:
             reg.upsert(_row(), run_id=RUN_ID, now="2026-01-01T00:00:00Z")
             got = reg.get("https://example.com/page")
-            assert got["source_url"] == "https://example.com/"
-            assert got["source_lead_id"] == "lead_1"
             assert got["first_seen_at"] == "2026-01-01T00:00:00Z"
             assert got["last_seen_at"] == "2026-01-01T00:00:00Z"
             assert got["last_run_id"] == RUN_ID
             assert got["times_seen"] == 1
-            assert got["source_url_count"] == 1
             assert got["render_type"] == "unknown"
             assert got["markdown_status"] == "not_attempted"
             assert got["consecutive_failures"] == 0
@@ -75,28 +71,23 @@ class TestUpdatePath:
             assert got["last_run_id"] == "run_2"
             assert got["times_seen"] == 2
             assert got["candidate_score"] == 80
-            assert got["source_url_count"] == 1
 
-    def test_second_seed_bumps_source_url_count(self, tmp_path):
+    def test_second_seed_tracks_multiple_sources(self, tmp_path):
         with UrlRegistry(tmp_path / "r.sqlite") as reg:
             reg.upsert(_row(), run_id=RUN_ID, now="2026-01-01T00:00:00Z")
             reg.upsert(
-                _row(source_url="https://other.com/", source_lead_id="lead_2"),
+                _row(source_url="https://other.com/"),
                 run_id=RUN_ID,
                 now="2026-01-02T00:00:00Z",
             )
-            got = reg.get("https://example.com/page")
-            assert got["source_url_count"] == 2
-            assert got["source_url"] == "https://example.com/"  # first wins
-            assert got["source_lead_id"] == "lead_1"
             sources = sorted(reg.sources_of("https://example.com/page"))
             assert sources == ["https://example.com/", "https://other.com/"]
 
-    def test_re_upsert_same_seed_does_not_bump_source_count(self, tmp_path):
+    def test_re_upsert_same_seed_deduplicates_sources(self, tmp_path):
         with UrlRegistry(tmp_path / "r.sqlite") as reg:
             reg.upsert(_row(), run_id=RUN_ID, now="2026-01-01T00:00:00Z")
             reg.upsert(_row(), run_id=RUN_ID, now="2026-01-02T00:00:00Z")
-            assert reg.get("https://example.com/page")["source_url_count"] == 1
+            assert list(reg.sources_of("https://example.com/page")) == ["https://example.com/"]
 
 
 class TestOutcomes:
@@ -321,20 +312,6 @@ class TestQuery:
             )
             assert [r["candidate_score"] for r in strong] == [80, 95]
             assert reg.count(where="candidate_score >= ?", params=(70,)) == 2
-
-
-class TestMaintenance:
-    def test_rebuild_source_url_count(self, tmp_path):
-        with UrlRegistry(tmp_path / "r.sqlite") as reg:
-            reg.upsert(_row(), run_id=RUN_ID)
-            # manually corrupt
-            reg._conn.execute(
-                "UPDATE urls SET source_url_count = 999 WHERE url = ?",
-                ("https://example.com/page",),
-            )
-            assert reg.get("https://example.com/page")["source_url_count"] == 999
-            reg.rebuild_source_url_count()
-            assert reg.get("https://example.com/page")["source_url_count"] == 1
 
 
 class TestCheckConstraint:
