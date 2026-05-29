@@ -8,7 +8,7 @@ from farmles_harvester.web.render_type_detector import detect_render_type
 def _static_page(body_text: str, extra_head: str = "") -> str:
     return f"""<!DOCTYPE html>
 <html>
-<head><title>Test</title>{extra_head}</head>
+<head><title>Test</title><meta charset="UTF-8">{extra_head}</head>
 <body>{body_text}</body>
 </html>"""
 
