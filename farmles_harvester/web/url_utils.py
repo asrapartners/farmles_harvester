@@ -18,6 +18,21 @@ class NormalizedUrlResult:
 
 
 def normalize_url(raw_url: str) -> NormalizedUrlResult:
+    """Normalize a raw URL string into a canonical form.
+
+    Transformations applied (in order):
+    - Strip leading/trailing whitespace
+    - Add https:// scheme if missing
+    - Strip /index.php front-controller prefix
+    - Remove tracking parameters (utm_*, fbclid, gclid)
+    - Ensure trailing slash on bare paths
+
+    Rejected (returns status != 'normalized') if:
+    - Input is empty
+    - Scheme is not http or https
+    - Hostname is empty or contains spaces
+    - No dot in hostname (except localhost)
+    """
     original = raw_url
     notes: list[str] = []
 
