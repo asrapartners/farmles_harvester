@@ -624,6 +624,24 @@ The harness should:
 
 ---
 
+## Implementation
+
+**Entry function:** `run_discover_links(input_path, stage_paths, run_id, config, fetcher, registry)`
+[`stages/discover_links.py`](../../farmles_harvester/stages/discover_links.py)
+
+Call sequence:
+1. `stream_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — streams validated source records
+2. `fetcher.fetch(final_url)` — [`web/fetcher.py`](../../farmles_harvester/web/fetcher.py) — fetches the source page
+3. `extract_links_from_html()` — [`web/html_utils.py`](../../farmles_harvester/web/html_utils.py) — extracts `<a href>` links
+4. `normalize_url()` / `is_internal_link()` — [`web/url_utils.py`](../../farmles_harvester/web/url_utils.py) — normalizes and classifies each link
+5. `score_discovered_link()` — [`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py) — pre-scores links during discovery (fast mode)
+6. `evaluate_url_strength()` — [`registry/evaluation.py`](../../farmles_harvester/registry/evaluation.py) — registry-based skip decision
+7. `JsonlWriter` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes output artifact
+
+Input field contract: `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
+
+---
+
 ## Configuration
 
 Recommended config values:
@@ -1086,19 +1104,3 @@ This stage is complete when:
 12. The stage returns a JSON-serializable `StageResult`.
 13. Unit tests cover extraction, relative URL resolution, internal/external detection, skip behavior, deduplication, caps, non-web href filtering, and error handling.
 14. The stage does not score links, fetch discovered links, extract facts, convert markdown, follow external links, or update the manifest directly.
-
-## Implementation
-
-**Entry function:** `run_discover_links(input_path, stage_paths, run_id, config, fetcher, registry)`
-[`stages/discover_links.py`](../../farmles_harvester/stages/discover_links.py)
-
-Call sequence:
-1. `stream_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — streams validated source records
-2. `fetcher.fetch(final_url)` — [`web/fetcher.py`](../../farmles_harvester/web/fetcher.py) — fetches the source page
-3. `extract_links_from_html()` — [`web/html_utils.py`](../../farmles_harvester/web/html_utils.py) — extracts `<a href>` links
-4. `normalize_url()` / `is_internal_link()` — [`web/url_utils.py`](../../farmles_harvester/web/url_utils.py) — normalizes and classifies each link
-5. `score_discovered_link()` — [`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py) — pre-scores links during discovery (fast mode)
-6. `evaluate_url_strength()` — [`registry/evaluation.py`](../../farmles_harvester/registry/evaluation.py) — registry-based skip decision
-7. `JsonlWriter` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes output artifact
-
-Input field contract: `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)

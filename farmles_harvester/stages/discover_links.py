@@ -38,6 +38,16 @@ def run_discover_links(
     fetcher=None,
     registry=None,
 ) -> StageResult:
+    """Stage 02: fetch each validated source page and extract all internal links.
+
+    Reads 01_validated_sources.jsonl, fetches each page via `fetcher`, extracts
+    and normalizes <a href> links, pre-scores them via score_discovered_link(),
+    and writes:
+      - 02_discovered_links.jsonl  (one record per discovered link)
+      - 02_discovered_links_errors.jsonl  (unexpected stage-level failures)
+      - 02_discovered_links_summary.json
+    Returns a StageResult with per-outcome counts.
+    """
     started_at = datetime.now(timezone.utc).isoformat()
     cfg = config or {}
     max_depth = cfg.get("max_depth", 1)

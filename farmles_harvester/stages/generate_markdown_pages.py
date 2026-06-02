@@ -75,6 +75,16 @@ def run_generate_markdown_pages(
     fetcher=None,
     registry=None,
 ) -> StageResult:
+    """Stage 04: fetch selected candidate pages and convert them to markdown wiki files.
+
+    Reads 03_candidate_urls.jsonl, fetches each selected page via `fetcher`,
+    cleans HTML, converts to markdown, and writes per-source wiki directories under
+    generated_wiki/. Also writes:
+      - 04_generated_pages.jsonl  (one record per processed page)
+      - 04_generated_pages_errors.jsonl  (unexpected stage-level failures)
+      - 04_generated_pages_summary.json
+    Returns a StageResult with per-outcome counts.
+    """
     started_at = datetime.now(timezone.utc).isoformat()
     wiki_dir = stage_paths.output_path.parent / "generated_wiki"
     cfg = config or {}

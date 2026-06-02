@@ -58,6 +58,8 @@ _DEFAULT_STRONG_THRESHOLD = 70
 
 @dataclass
 class LinkRecord:
+    """Input to score_discovered_link: a single discovered link with its context."""
+
     discovered_url: str
     link_text: str
     is_internal: bool
@@ -66,6 +68,8 @@ class LinkRecord:
 
 @dataclass
 class CandidateScore:
+    """Output of score_discovered_link: scoring result for a single link."""
+
     candidate_score: int
     candidate_type: str
     candidate_status: str
@@ -84,6 +88,7 @@ def _tokenize(url: str, text: str) -> set[str]:
 
 
 def score_discovered_link(link_record: LinkRecord, config: dict | None = None) -> CandidateScore:
+    """Pure scoring function: apply token-based rules to a link and return its CandidateScore."""
     cfg = config or {}
     selected_threshold = cfg.get("selected_threshold", _DEFAULT_SELECTED_THRESHOLD)
     strong_threshold = cfg.get("strong_candidate_threshold", _DEFAULT_STRONG_THRESHOLD)
@@ -182,6 +187,15 @@ def run_score_candidate_urls(
     run_id: str,
     config: dict | None = None,
 ) -> StageResult:
+    """Stage 03: score every discovered link and select candidates for crawling.
+
+    Reads 02_discovered_links.jsonl, applies score_discovered_link() to each
+    record, and writes:
+      - 03_candidate_urls.jsonl  (all scored records, selected and rejected)
+      - 03_candidate_urls_errors.jsonl  (unexpected stage-level failures)
+      - 03_candidate_urls_summary.json
+    Returns a StageResult with per-strength counts.
+    """
     started_at = datetime.now(timezone.utc).isoformat()
 
     # --- Pass 1: score every record, collect into memory ---

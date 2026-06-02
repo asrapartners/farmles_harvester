@@ -1153,6 +1153,26 @@ The harness should:
 
 ---
 
+## Implementation
+
+**Entry function:** `run_score_candidate_urls(input_path, stage_paths, run_id, config)`
+[`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py)
+
+Call sequence:
+1. `stream_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — streams discovered link records
+2. `score_discovered_link(LinkRecord, config)` — local pure function — applies token-based scoring rules, returns `CandidateScore`
+3. `JsonlWriter` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes all scored records (selected and rejected)
+
+Key dataclasses (also imported by stage 02):
+- `LinkRecord` — `(discovered_url, link_text, is_internal, follow_allowed)`
+- `CandidateScore` — `(candidate_score, candidate_type, candidate_status, candidate_strength, score_reasons)`
+
+Scoring constants: `CandidateType`, `CandidateStatus`, `CandidateStrength` in [`constants.py`](../../farmles_harvester/constants.py)
+
+Input field contract: `DISCOVERED_LINK_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
+
+---
+
 ## Configuration
 
 Recommended config values:
@@ -1578,21 +1598,3 @@ This stage is complete when:
 10. The stage returns a JSON-serializable `StageResult`.
 11. Unit tests cover vendor, hours, visit/location, calendar/events, about/contact, privacy, old blog, external, score clamping, candidate strength, deduplication, and malformed input.
 12. The stage does not fetch pages, validate URLs, extract facts, convert markdown, call an LLM, or update the manifest directly.
-
-## Implementation
-
-**Entry function:** `run_score_candidate_urls(input_path, stage_paths, run_id, config)`
-[`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py)
-
-Call sequence:
-1. `stream_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — streams discovered link records
-2. `score_discovered_link(LinkRecord, config)` — local pure function — applies token-based scoring rules, returns `CandidateScore`
-3. `JsonlWriter` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes all scored records (selected and rejected)
-
-Key dataclasses (also imported by stage 02):
-- `LinkRecord` — `(discovered_url, link_text, is_internal, follow_allowed)`
-- `CandidateScore` — `(candidate_score, candidate_type, candidate_status, candidate_strength, score_reasons)`
-
-Scoring constants: `CandidateType`, `CandidateStatus`, `CandidateStrength` in [`constants.py`](../../farmles_harvester/constants.py)
-
-Input field contract: `DISCOVERED_LINK_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
