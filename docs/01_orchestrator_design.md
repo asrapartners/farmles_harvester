@@ -61,3 +61,53 @@ If a stage fails then stop the run. Record failed StageResult in manifest.json a
 
 **Registry ingestion** (non-fatal — warns but does not stop the pipeline):
 [`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/pipeline/registry_integration.md`](pipeline/registry_integration.md) for details.
+
+---
+
+## UrlRegistry Integration
+
+[`registry/url_registry.py`](../farmles_harvester/registry/url_registry.py) is a SQLite-backed persistent store for tracking URLs across runs. The orchestrator instantiates one `UrlRegistry` at the start of `run_pipeline()` and closes it at the end. The default path is `{run_dir}/url_registry.db`; callers can supply a shared path to reuse the registry across multiple runs (required for fast mode to take effect).
+
+**Reads** happen *during* stage execution and only when `fast_mode: true` is set in config and a cross-run registry is provided. **Writes** happen *after* each stage via `orchestrator/registry_ingest.py`. All ingestion calls are non-fatal — a failure warns but does not stop the pipeline.
+
+| Stage | Direction | When | Operation | Purpose |
+|---|---|---|---|---|
+| 01 — Validate URLs | WRITE | After stage | `upsert()` + `record_outcome(permanent)` | Record seed URLs that failed validation as permanent failures |
+| 02 — Discover Links | READ | During stage (fast mode only) | `get(url)` → `evaluate_url_strength()` | Skip crawling internal links already known as strong |
+| 03 — Score Candidate URLs | WRITE | After stage | `upsert_many()` + `record_source()` | Persist discovered URLs with candidate scores and source mappings |
+| 04 — Generate Markdown Pages | READ | During stage (fast mode only) | `get_many(urls)` → `evaluate_markdown_strength()` | Skip re-fetching candidates that already have sufficient markdown |
+| 04 — Generate Markdown Pages | WRITE | After stage | `record_outcome()` + `record_markdown_outcome()` | Record HTTP fetch results and markdown word counts/paths |
+| 06 — Score Source Relevance | WRITE | After stage | `upsert_source_many()` | Persist source-level relevance labels and keyword stats |
+
+Fast-mode decision logic lives in [`registry/evaluation.py`](../farmles_harvester/registry/evaluation.py): `evaluate_url_strength()` (stage 02) and `evaluate_markdown_strength()` (stage 04).
+
+---
+
+## High-Level Flow Diagram
+
+Solid arrows are **writes** (post-stage ingestion via `registry_ingest.py`). Dashed arrows are **reads** (fast-mode lookups during stage execution).
+
+```mermaid
+flowchart TD
+    Input([seed_urls.txt])
+
+    S00["**00** · Normalize Source Leads"]
+    S01["**01** · Validate URLs"]
+    S02["**02** · Discover Links"]
+    S03["**03** · Score Candidate URLs"]
+    S04["**04** · Generate Markdown Pages"]
+    S05["**05** · Strip Boilerplate Blocks"]
+    S06["**06** · Score Source Relevance"]
+
+    REG[("url_registry\n─────────────\nurls\nurl_sources\nsources")]
+
+    Input --> S00 --> S01 --> S02 --> S03 --> S04 --> S05 --> S06
+
+    S01 -->|"WRITE · ingest_validation_failures\nupsert + record_outcome(permanent)"| REG
+    REG -.->|"READ · fast mode only\nget → evaluate_url_strength"| S02
+    S03 -->|"WRITE · ingest_urls\nupsert_many + record_source"| REG
+    REG -.->|"READ · fast mode only\nget_many → evaluate_markdown_strength"| S04
+    S04 -->|"WRITE · ingest_fetch_outcomes\nrecord_outcome"| REG
+    S04 -->|"WRITE · ingest_markdown_outcomes\nrecord_markdown_outcome"| REG
+    S06 -->|"WRITE · ingest_source_relevance\nupsert_source_many"| REG
+```
