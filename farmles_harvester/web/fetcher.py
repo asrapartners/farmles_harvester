@@ -17,11 +17,14 @@ class FetchResponse:
 
 
 class HttpFetcher:
+    """HTTP fetcher that follows redirects and normalizes responses into FetchResponse."""
+
     def __init__(self, timeout: int = 15, user_agent: str = "farmles-harvester/0.1"):
         self._timeout = timeout
         self._headers = {"User-Agent": user_agent}
 
     def fetch(self, url: str) -> FetchResponse:
+        """Fetch `url`, follow redirects, return FetchResponse. Raises FetchTimeoutError on timeout."""
         try:
             resp = _requests.get(
                 url, timeout=self._timeout, headers=self._headers, allow_redirects=True

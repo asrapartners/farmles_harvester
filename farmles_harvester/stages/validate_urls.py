@@ -56,6 +56,15 @@ def run_validate_urls(
     config: dict | None = None,
     fetcher=None,
 ) -> StageResult:
+    """Stage 01: validate each normalized URL for reachability and classify the result.
+
+    Reads 00_normalized_source_leads.jsonl, fetches each URL via `fetcher`,
+    classifies the response into a validation_status, and writes:
+      - 01_validated_sources.jsonl  (one record per input)
+      - 01_validated_sources_errors.jsonl  (unexpected stage-level failures)
+      - 01_validated_sources_summary.json
+    Returns a StageResult with per-status counts.
+    """
     started_at = datetime.now(timezone.utc).isoformat()
 
     input_records = read_jsonl(input_path)

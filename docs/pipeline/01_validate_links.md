@@ -407,6 +407,22 @@ The harness should:
 
 ---
 
+## Implementation
+
+**Entry function:** `run_validate_urls(input_path, stage_paths, run_id, config, fetcher)`
+[`stages/validate_urls.py`](../../farmles_harvester/stages/validate_urls.py)
+
+Call sequence:
+1. `read_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — reads normalized source leads
+2. `fetcher.fetch(normalized_url)` — [`web/fetcher.py`](../../farmles_harvester/web/fetcher.py) — performs HTTP fetch, follows redirects
+3. `_classify_response()` — local helper — maps HTTP response to `validation_status`
+4. `write_jsonl()` / `write_json()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes output and summary artifacts
+
+Input field contract: `NORMALIZED_SOURCE_LEAD_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
+Output field contract: `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
+
+---
+
 ## Configuration
 
 Recommended config values:
@@ -713,17 +729,3 @@ This stage is complete when:
 6. Unit tests cover valid, redirected, broken, blocked, non-HTML, timeout, and invalid URL cases.
 7. Harness tests confirm artifact creation and record counts.
 8. The stage does not discover links, extract facts, convert markdown, or modify the manifest directly.
-
-## Implementation
-
-**Entry function:** `run_validate_urls(input_path, stage_paths, run_id, config, fetcher)`
-[`stages/validate_urls.py`](../../farmles_harvester/stages/validate_urls.py)
-
-Call sequence:
-1. `read_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — reads normalized source leads
-2. `fetcher.fetch(normalized_url)` — [`web/fetcher.py`](../../farmles_harvester/web/fetcher.py) — performs HTTP fetch, follows redirects
-3. `_classify_response()` — local helper — maps HTTP response to `validation_status`
-4. `write_jsonl()` / `write_json()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes output and summary artifacts
-
-Input field contract: `NORMALIZED_SOURCE_LEAD_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
-Output field contract: `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
