@@ -1,5 +1,7 @@
 # Generate Markdown for lead
 
+_Part of the pipeline — see [Pipeline Orchestrator Design](../01_orchestrator_design.md)._
+
 ## Purpose
 Read selected candidate URLs, fetch those pages and convert them to markdown. Keep the pages close enough to html to preseverve evidence, but clean enough for humans. Do not preserve junk because it was in HTML. For example ignore
 - navigation menus
@@ -134,3 +136,20 @@ runs/2026-05-17_132400_initial-import/
       index.md
       vendors.md
 ```
+
+## Implementation
+
+**Entry function:** `run_generate_markdown_pages(input_path, stage_paths, run_id, config, fetcher, registry)`
+[`stages/generate_markdown_pages.py`](../../farmles_harvester/stages/generate_markdown_pages.py)
+
+Call sequence:
+1. `stream_jsonl()` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — streams selected candidate records
+2. `source_url_to_slug()` — [`web/url_utils.py`](../../farmles_harvester/web/url_utils.py) — derives folder name from source URL
+3. `fetcher.fetch(candidate_url)` — [`web/fetcher.py`](../../farmles_harvester/web/fetcher.py) — fetches the candidate page
+4. `clean_html()` — [`web/html_cleaner.py`](../../farmles_harvester/web/html_cleaner.py) — strips boilerplate before conversion
+5. `html_to_markdown()` — local helper — converts cleaned HTML to markdown
+6. `compute_content_hash()` — local helper — SHA-256 hash of markdown content
+7. `evaluate_markdown_strength()` — [`registry/evaluation.py`](../../farmles_harvester/registry/evaluation.py) — registry-based skip decision
+8. `JsonlWriter` — [`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py) — writes output artifact
+
+Input field contract: `CANDIDATE_URL_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)
