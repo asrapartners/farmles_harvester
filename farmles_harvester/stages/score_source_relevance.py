@@ -22,6 +22,7 @@ def run_score_source_relevance(
 
     # Group MD file paths by source_slug
     source_paths: dict[str, list[Path]] = {}
+    missing_files: list[dict] = []
     for record in all_records:
         if not record.get("markdown_path"):
             continue
@@ -31,6 +32,17 @@ def run_score_source_relevance(
         abs_path = run_dir / record["markdown_path"]
         if abs_path.exists():
             source_paths.setdefault(slug, []).append(abs_path)
+        else:
+            missing_files.append({
+                "run_id": run_id,
+                "stage_name": "score_source_relevance",
+                "source_slug": slug,
+                "markdown_path": record["markdown_path"],
+                "error_type": "missing_file",
+                "message": f"markdown file not found on disk: {record['markdown_path']}",
+                "retryable": False,
+                "created_at": started_at,
+            })
 
     counts_by_label: dict[str, int] = {
         SourceRelevanceLabel.CONFIRMED: 0,
@@ -40,7 +52,10 @@ def run_score_source_relevance(
     }
 
     with JsonlWriter(stage_paths.output_path) as out, \
-         JsonlWriter(stage_paths.errors_path) as _err:
+         JsonlWriter(stage_paths.errors_path) as err:
+
+        for record in missing_files:
+            err.write(record)
 
         for slug, paths in source_paths.items():
             texts = [p.read_text(encoding="utf-8") for p in paths]
@@ -74,6 +89,8 @@ def run_score_source_relevance(
         "likely_count": counts_by_label[SourceRelevanceLabel.LIKELY],
         "uncertain_count": counts_by_label[SourceRelevanceLabel.UNCERTAIN],
         "low_confidence_count": counts_by_label[SourceRelevanceLabel.LOW_CONFIDENCE],
+        "missing_files": len(missing_files),
+        "error_records": len(missing_files),
     }
 
     summary = {
