@@ -19,36 +19,6 @@ It does **not** call an LLM.
 
 ---
 
-## Stage Name
-
-```text
-score_candidate_urls
-```
-
-## Stage Number
-
-```text
-03
-```
-
----
-
-## Position in Pipeline
-
-```text
-00_normalized_source_leads.jsonl
-   ↓
-01_validated_sources.jsonl
-   ↓
-02_discovered_links.jsonl
-   ↓
-03_candidate_urls.jsonl
-   ↓
-04_fetched_candidate_urls.jsonl
-```
-
----
-
 ## Consumed Artifact
 
 ```text
@@ -57,91 +27,32 @@ score_candidate_urls
 
 Each input record represents one link discovered on a validated source page.
 
-Example input record:
-
-```json
-{
-  "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
-  "site_id": "site_8f31a2",
-  "source_url": "https://www.apexfarmersmarket.com/",
-  "source_domain": "apexfarmersmarket.com",
-  "raw_href": "/vendors",
-  "discovered_url": "https://www.apexfarmersmarket.com/vendors",
-  "discovered_domain": "apexfarmersmarket.com",
-  "link_text": "Vendors",
-  "is_internal": true,
-  "follow_allowed": true,
-  "depth": 1,
-  "discovery_method": "html_anchor",
-  "discovered_at": "2026-05-16T11:45:00Z"
-}
-```
-
----
-
-## Produced Artifacts
-
-```text
-03_candidate_urls.jsonl
-03_candidate_urls_summary.json
-03_candidate_urls_errors.jsonl
-```
+| Field | Required | How this stage uses it |
+|---|---|---|
+| `discovered_url` | yes | Scored — path segments and query keys are tokenized for signal matching |
+| `link_text` | yes | Scored — text tokens feed the same signal matching as the URL |
+| `is_internal` | yes | Scored — external links short-circuit immediately to `external_reference` |
+| `source_lead_id` | yes | Preserved in output; used for deduplication key |
+| `source_url` | yes | Preserved in output |
+| `run_id` | yes | Validated; output record re-injects it from the harness `run_id` arg |
+| `follow_allowed` | yes | Validated (in `DISCOVERED_LINK_REQUIRED`) but not used in scoring logic |
+| `input_url` | no | Passed through to output if present |
+| `normalized_url` | no | Passed through to output if present |
+| all other fields | no | Ignored |
 
 ---
 
 ## Core Responsibility
 
-For each discovered link record:
+For each discovered link record ([`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py) → `run_score_candidate_urls()`):
 
-1. Read `discovered_url`, `link_text`, `is_internal`, and `follow_allowed`.
-2. Apply deterministic scoring rules.
-3. Assign a `candidate_score`.
-4. Assign a `candidate_type`.
-5. Assign a `candidate_status`.
-6. Record `score_reasons`.
-7. Write selected and optionally rejected candidate records to `03_candidate_urls.jsonl`.
-8. Write structured errors to `03_candidate_urls_errors.jsonl`.
-9. Write stage summary to `03_candidate_urls_summary.json`.
-10. Return a serializable `StageResult`.
-
----
-
-## Non-Responsibilities
-
-This stage must not:
-
-- fetch discovered URLs
-- validate whether discovered URLs work
-- parse HTML pages
-- convert HTML to markdown
-- extract market name
-- extract market hours
-- extract location
-- extract vendors
-- call an LLM
-- crawl external domains
-- update `manifest.json` directly
-
----
-
-## Naming Note
-
-The preferred stage name is:
-
-```text
-score_candidate_urls
-```
-
-Avoid naming this stage:
-
-```text
-store_candidates
-```
-
-Reason:
-
-All stages store artifacts. This stage’s actual domain responsibility is scoring and selecting candidate pages.
+1. Read `discovered_url`, `link_text`, and `is_internal` for scoring; `source_lead_id` and `source_url` for output.
+2. Apply deterministic scoring rules — `score_discovered_link(LinkRecord, config) -> CandidateScore`.
+3. Assign a `candidate_score` — integer 0–100, clamped.
+4. Assign a `candidate_type` — strongest matched signal family (`CandidateType` in [`constants.py`](../../farmles_harvester/constants.py)).
+5. Assign a `candidate_status` — routing decision (`CandidateStatus` in [`constants.py`](../../farmles_harvester/constants.py)).
+6. Record `score_reasons` — list of applied signals with point values.
+7. Write all scored records (selected and rejected) to `03_candidate_urls.jsonl` via `JsonlWriter` ([`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py)).
 
 ---
 
@@ -165,102 +76,30 @@ external = record/reject, not selected for fetch
 
 ---
 
-## Candidate Status Values
+## Scoring Output Fields
 
-Allowed `candidate_status` values:
+`score_discovered_link()` ([`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py)) assigns these fields on every output record in `03_candidate_urls.jsonl`:
 
-```text
-selected
-rejected
-external_reference
-```
+**`candidate_status`** — routing decision for downstream stages:
 
-### Meaning
+| Value | Meaning |
+|---|---|
+| `selected` | Score ≥ threshold; will be fetched by stage 04 |
+| `rejected` | Score below threshold |
+| `external_reference` | External domain; not fetched in v1 |
 
-```text
-selected
-```
+**`candidate_type`** — strongest signal family that drove the score:
 
-The link is useful enough to be fetched by a later stage.
-
-```text
-rejected
-```
-
-The link does not appear useful enough for v1.
-
-```text
-external_reference
-```
-
-The link points to an external domain. It may be useful later, but it should not be fetched in this v1 candidate-page flow.
-
----
-
-## Candidate Type Values
-
-Allowed `candidate_type` values:
-
-```text
-vendor_page
-hours_location_page
-calendar_events_page
-about_contact_page
-general_market_page
-external_reference
-low_value_page
-unknown
-```
-
-### Meaning
-
-```text
-vendor_page
-```
-
-Likely contains vendor names, vendor roster, product categories, or vendor applications.
-
-```text
-hours_location_page
-```
-
-Likely contains hours, schedule, address, directions, parking, or visit information.
-
-```text
-calendar_events_page
-```
-
-Likely contains calendar, events, seasonal dates, special markets, or opening days.
-
-```text
-about_contact_page
-```
-
-Likely contains about, contact, organization, manager, or general market info.
-
-```text
-general_market_page
-```
-
-Likely relevant to the market but not specific enough to classify more narrowly.
-
-```text
-external_reference
-```
-
-External link recorded as a reference, not a v1 fetch candidate.
-
-```text
-low_value_page
-```
-
-Clearly not useful for market data extraction.
-
-```text
-unknown
-```
-
-No strong positive or negative signal.
+| Value | Likely content |
+|---|---|
+| `vendor_page` | Vendor names, roster, product categories, or applications |
+| `hours_location_page` | Hours, schedule, address, directions, or parking |
+| `calendar_events_page` | Calendar, events, seasonal dates, or opening days |
+| `about_contact_page` | About, contact, organization, manager, or general market info |
+| `general_market_page` | Relevant to the market but not more narrowly classifiable |
+| `external_reference` | External link; recorded as reference, not a v1 fetch candidate |
+| `low_value_page` | Matched a hard-reject token (privacy, login, cart, …) |
+| `unknown` | No strong positive or negative signal |
 
 ---
 
@@ -315,110 +154,40 @@ If scores tie, keep the first record.
 
 ## Output Record Contract
 
-Each line in `03_candidate_urls.jsonl` must be one JSON object.
+Each line in `03_candidate_urls.jsonl` is one JSON object.
 
-Required fields:
+| Field | Required | Description |
+|---|---|---|
+| `run_id` | yes | Run identifier, injected by the harness |
+| `source_lead_id` | yes | Identity of the seed lead; preserved from input |
+| `source_url` | yes | Seed URL that was crawled; preserved from input |
+| `candidate_url` | yes | The scored URL (renamed from `discovered_url`) |
+| `link_text` | yes | Anchor text of the link; preserved from input |
+| `is_internal` | yes | Whether the link is on the same domain as the source |
+| `candidate_score` | yes | Integer 0–100; higher means more likely to contain market data |
+| `candidate_type` | yes | Strongest signal family — see [Scoring Output Fields](#scoring-output-fields) |
+| `candidate_status` | yes | Routing decision (`selected`, `rejected`, `external_reference`) |
+| `candidate_strength` | yes | `strong` (≥70), `medium` (≥40), `weak` (<40) |
+| `score_reasons` | yes | List of scoring signals applied, e.g. `["+50 matched ['vendor']", "-30 soft penalty: blog"]` |
+| `scored_at` | yes | ISO-8601 timestamp |
+| `input_url` | no | Passed through from input if present |
+| `normalized_url` | no | Passed through from input if present |
 
-```text
-run_id
-source_lead_id
-source_url
-discovered_url
-link_text
-is_internal
-follow_allowed
-candidate_score
-candidate_type
-candidate_status
-candidate_strength
-score_reasons
-scored_at
-```
-
-Optional fields:
-
-```text
-site_id
-source_domain
-discovered_domain
-raw_href
-depth
-discovery_method
-```
-
-Example selected vendor page:
+Example:
 
 ```json
 {
   "run_id": "2026-05-16_113045_full-recrawl",
   "source_lead_id": "lead_000001",
-  "site_id": "site_8f31a2",
   "source_url": "https://www.apexfarmersmarket.com/",
-  "source_domain": "apexfarmersmarket.com",
-  "raw_href": "/vendors",
-  "discovered_url": "https://www.apexfarmersmarket.com/vendors",
-  "discovered_domain": "apexfarmersmarket.com",
+  "candidate_url": "https://www.apexfarmersmarket.com/vendors",
   "link_text": "Vendors",
   "is_internal": true,
-  "follow_allowed": true,
-  "depth": 1,
-  "discovery_method": "html_anchor",
-  "candidate_score": 80,
+  "candidate_score": 70,
   "candidate_type": "vendor_page",
   "candidate_status": "selected",
   "candidate_strength": "strong",
-  "score_reasons": [
-    "url_contains_vendor",
-    "link_text_contains_vendor",
-    "internal_follow_allowed"
-  ],
-  "scored_at": "2026-05-16T11:55:00Z"
-}
-```
-
-Example rejected low-value page:
-
-```json
-{
-  "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
-  "source_url": "https://www.apexfarmersmarket.com/",
-  "raw_href": "/privacy-policy",
-  "discovered_url": "https://www.apexfarmersmarket.com/privacy-policy",
-  "link_text": "Privacy Policy",
-  "is_internal": true,
-  "follow_allowed": true,
-  "candidate_score": 0,
-  "candidate_type": "low_value_page",
-  "candidate_status": "rejected",
-  "candidate_strength": "weak",
-  "score_reasons": [
-    "url_contains_low_value_path"
-  ],
-  "scored_at": "2026-05-16T11:55:00Z"
-}
-```
-
-Example external reference:
-
-```json
-{
-  "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
-  "source_url": "https://www.apexfarmersmarket.com/",
-  "raw_href": "https://www.facebook.com/apexfarmersmarket",
-  "discovered_url": "https://www.facebook.com/apexfarmersmarket",
-  "discovered_domain": "facebook.com",
-  "link_text": "Facebook",
-  "is_internal": false,
-  "follow_allowed": false,
-  "candidate_score": 0,
-  "candidate_type": "external_reference",
-  "candidate_status": "external_reference",
-  "candidate_strength": "weak",
-  "score_reasons": [
-    "external_link_not_selected_v1"
-  ],
+  "score_reasons": ["+50 matched ['vendor', 'vendors']", "+20 matched ['market']"],
   "scored_at": "2026-05-16T11:55:00Z"
 }
 ```
@@ -427,193 +196,43 @@ Example external reference:
 
 ## Error Artifact Contract
 
-`03_candidate_urls_errors.jsonl` is for unexpected processing failures.
+`03_candidate_urls_errors.jsonl` — one record per input the stage could not process. Malformed records produce an error and do not crash the stage.
 
-Each error record must include:
-
-```text
-run_id
-stage_name
-source_lead_id
-discovered_url
-error_type
-message
-retryable
-created_at
-```
-
-Example:
-
-```json
-{
-  "run_id": "2026-05-16_113045_full-recrawl",
-  "stage_name": "score_candidate_urls",
-  "source_lead_id": "lead_000017",
-  "discovered_url": "https://examplemarket.org/vendors",
-  "error_type": "unexpected_scoring_error",
-  "message": "Unexpected scoring failure",
-  "retryable": false,
-  "created_at": "2026-05-16T11:57:00Z"
-}
-```
-
-Malformed input records should produce an error record and not crash the entire stage.
+| Field | Description |
+|---|---|
+| `run_id` | Run identifier |
+| `stage_name` | Always `score_candidate_urls` |
+| `source_lead_id` | From the input record, if present |
+| `discovered_url` | From the input record, if present |
+| `error_type` | e.g. `invalid_input_record` |
+| `message` | Human-readable description of the failure |
+| `retryable` | Boolean |
+| `created_at` | ISO-8601 timestamp |
 
 ---
 
 ## Summary Artifact Contract
 
-`03_candidate_urls_summary.json` must contain one JSON object.
+`03_candidate_urls_summary.json` — one JSON object written after the stage completes.
 
-Required fields:
-
-```text
-stage_name
-stage_number
-input_records
-output_records
-error_records
-selected_count
-rejected_count
-external_reference_count
-strong_candidate_count
-medium_candidate_count
-weak_candidate_count
-vendor_page_count
-hours_location_page_count
-calendar_events_page_count
-about_contact_page_count
-general_market_page_count
-low_value_page_count
-unknown_count
-started_at
-completed_at
-```
-
-Example:
-
-```json
-{
-  "stage_name": "score_candidate_urls",
-  "stage_number": "03",
-  "input_records": 1440,
-  "output_records": 1440,
-  "error_records": 2,
-  "selected_count": 220,
-  "rejected_count": 1030,
-  "external_reference_count": 190,
-  "strong_candidate_count": 90,
-  "medium_candidate_count": 130,
-  "weak_candidate_count": 1220,
-  "vendor_page_count": 70,
-  "hours_location_page_count": 95,
-  "calendar_events_page_count": 35,
-  "about_contact_page_count": 50,
-  "general_market_page_count": 20,
-  "low_value_page_count": 980,
-  "unknown_count": 190,
-  "started_at": "2026-05-16T11:50:00Z",
-  "completed_at": "2026-05-16T11:57:00Z"
-}
-```
-
----
-
-## StageResult Contract
-
-The stage harness must return a serializable `StageResult`.
-
-Required fields:
-
-```text
-stage_id
-stage_number
-stage_name
-status
-consumed_artifacts
-produced_artifacts
-summary_artifact
-error_artifact
-counts
-started_at
-completed_at
-```
-
-Example:
-
-```json
-{
-  "stage_id": "03_score_candidate_urls",
-  "stage_number": "03",
-  "stage_name": "score_candidate_urls",
-  "status": "completed",
-  "consumed_artifacts": [
-    "02_discovered_links.jsonl"
-  ],
-  "produced_artifacts": [
-    "03_candidate_urls.jsonl"
-  ],
-  "summary_artifact": "03_candidate_urls_summary.json",
-  "error_artifact": "03_candidate_urls_errors.jsonl",
-  "counts": {
-    "input_records": 1440,
-    "output_records": 1440,
-    "error_records": 2,
-    "selected_count": 220,
-    "rejected_count": 1030,
-    "external_reference_count": 190
-  },
-  "started_at": "2026-05-16T11:50:00Z",
-  "completed_at": "2026-05-16T11:57:00Z"
-}
-```
-
----
-
-## Suggested Python Components
-
-### Pure scoring function
-
-```text
-score_discovered_link(link_record, config) -> CandidateScore
-```
-
-This function should:
-
-- inspect `discovered_url`
-- inspect `link_text`
-- inspect `is_internal`
-- inspect `follow_allowed`
-- compute `candidate_score`
-- assign `candidate_type`
-- assign `candidate_status`
-- return `score_reasons`
-
-It should not know about:
-
-- JSONL
-- manifest
-- run folders
-- stage paths
-- file handles
-
----
-
-### Stage harness
-
-```text
-run_score_candidate_urls(input_path, stage_paths, run_id, config) -> StageResult
-```
-
-The harness should:
-
-1. Read `02_discovered_links.jsonl`.
-2. Call `score_discovered_link()` per record.
-3. Deduplicate candidate records by `source_lead_id + discovered_url`.
-4. Write `03_candidate_urls.jsonl`.
-5. Write `03_candidate_urls_errors.jsonl`.
-6. Write `03_candidate_urls_summary.json`.
-7. Return `StageResult`.
+| Field | Description |
+|---|---|
+| `stage_name` | `score_candidate_urls` |
+| `stage_number` | `03` |
+| `run_id` | Run identifier |
+| `input_records` | Total records read |
+| `output_records` | Total records written |
+| `error_records` | Records that failed processing |
+| `selected_count` | Records with `candidate_status = selected` |
+| `rejected_count` | Records with `candidate_status = rejected` |
+| `external_reference_count` | Records with `candidate_status = external_reference` |
+| `strong_candidate_count` | Records with `candidate_strength = strong` |
+| `medium_candidate_count` | Records with `candidate_strength = medium` |
+| `weak_candidate_count` | Records with `candidate_strength = weak` |
+| `homepage_promoted_count` | Rejected homepages promoted because the source had meaningful sub-page selections |
+| `program_boosted_count` | Rejected records boosted because the source linked to an authoritative program domain |
+| `started_at` | ISO-8601 timestamp |
+| `completed_at` | ISO-8601 timestamp |
 
 ---
 
@@ -650,399 +269,18 @@ Recommended config values:
 }
 ```
 
----
+## Registry Integration
 
-## Implementation Rules
+After this stage completes, the orchestrator calls `ingest_urls()` in [`orchestrator/registry_ingest.py`](../../farmles_harvester/orchestrator/registry_ingest.py). The stage itself does not touch the registry.
 
-1. Preserve `source_lead_id` from the input record.
-2. Preserve `source_url` from the input record.
-3. Preserve `discovered_url` from the input record.
-4. Use deterministic rules only.
-5. Do not call an LLM.
-6. Do not fetch discovered URLs.
-7. Do not validate whether discovered URLs work.
-8. Do not convert HTML to markdown.
-9. Do not extract market facts.
-10. Always include `candidate_score`, `candidate_type`, `candidate_status`, and `score_reasons`.
-11. Clamp score to the range 0 to 100.
-12. External links must not be selected as v1 fetch candidates.
-13. All timestamps must be ISO-8601 strings.
-14. All output files must be valid JSON or JSONL.
-15. The stage must not update `manifest.json` directly.
+`ingest_urls()` reads both `02_discovered_links.jsonl` and `03_candidate_urls.jsonl`:
 
----
+| Operation | What it does |
+|---|---|
+| `registry.upsert_many()` | Inserts or updates one row per discovered URL with `candidate_score`, `candidate_status`, `candidate_strength`, `candidate_type` from stage 03 and `source_url` from stage 02 |
+| `registry.record_source()` | Records additional source mappings for URLs discovered from more than one source page |
 
-# Passing Criteria for Tester Agent
-
-## Unit Tests for `score_discovered_link()`
-
-### Test 1: vendor link gets selected
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/vendors",
-  "link_text": "Vendors",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_status = selected
-candidate_type = vendor_page
-candidate_score >= 40
-score_reasons includes url_contains_vendor
-score_reasons includes link_text_contains_vendor
-```
-
----
-
-### Test 2: hours link gets selected
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/hours",
-  "link_text": "Market Hours",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_status = selected
-candidate_type = hours_location_page
-candidate_score >= 40
-```
-
----
-
-### Test 3: visit/location link gets selected
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/visit-us",
-  "link_text": "Visit Us",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_status = selected
-candidate_type = hours_location_page
-candidate_score >= 40
-```
-
----
-
-### Test 4: calendar/events link gets selected
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/events",
-  "link_text": "Events",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_status = selected
-candidate_type = calendar_events_page
-candidate_score >= 40
-```
-
----
-
-### Test 5: about/contact link can be selected if score reaches threshold
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/contact",
-  "link_text": "Contact",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_type = about_contact_page
-candidate_score reflects about/contact positive rules
-candidate_status depends on selected_threshold
-```
-
----
-
-### Test 6: privacy link gets rejected
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/privacy-policy",
-  "link_text": "Privacy Policy",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-candidate_status = rejected
-candidate_type = low_value_page
-candidate_score = 0
-score_reasons includes url_contains_low_value_path
-```
-
----
-
-### Test 7: old blog link is penalized
-
-Given:
-
-```json
-{
-  "discovered_url": "https://example.org/blog/2019-opening-day",
-  "link_text": "Opening Day 2019",
-  "is_internal": true,
-  "follow_allowed": true
-}
-```
-
-Expected:
-
-```text
-score_reasons includes url_contains_blog_archive_signal
-score_reasons includes contains_old_year
-candidate_score is lower than equivalent non-old non-blog event link
-```
-
----
-
-### Test 8: external link becomes external_reference
-
-Given:
-
-```json
-{
-  "discovered_url": "https://facebook.com/examplemarket",
-  "link_text": "Facebook",
-  "is_internal": false,
-  "follow_allowed": false
-}
-```
-
-Expected:
-
-```text
-candidate_status = external_reference
-candidate_type = external_reference
-candidate_score = 0
-score_reasons includes external_link_not_selected_v1
-```
-
----
-
-### Test 9: score is clamped to 100
-
-Given a link that matches many positive signals.
-
-Expected:
-
-```text
-candidate_score <= 100
-```
-
----
-
-### Test 10: score is clamped to 0
-
-Given a link with strong negative signals.
-
-Expected:
-
-```text
-candidate_score >= 0
-```
-
----
-
-### Test 11: candidate strength is assigned
-
-Given scores:
-
-```text
-80
-50
-10
-```
-
-Expected:
-
-```text
-80 -> strong
-50 -> medium
-10 -> weak
-```
-
----
-
-## Stage Harness Tests
-
-### Test 12: reads discovered links and writes candidate pages
-
-Given an input file with 3 discovered link records.
-
-Expected:
-
-```text
-03_candidate_urls.jsonl exists
-it contains scored records
-each record contains candidate_score
-each record contains candidate_type
-each record contains candidate_status
-each record contains score_reasons
-```
-
----
-
-### Test 13: preserves source identity
-
-Given input:
-
-```json
-{
-  "source_lead_id": "lead_000001",
-  "source_url": "https://example.org/",
-  "discovered_url": "https://example.org/vendors"
-}
-```
-
-Expected output preserves:
-
-```text
-source_lead_id
-source_url
-discovered_url
-```
-
----
-
-### Test 14: deduplicates by source_lead_id + discovered_url
-
-Given duplicate input records with the same:
-
-```text
-source_lead_id
-discovered_url
-```
-
-Expected:
-
-```text
-only one output candidate record
-```
-
----
-
-### Test 15: writes summary JSON
-
-After running the stage:
-
-```text
-03_candidate_urls_summary.json exists
-```
-
-Expected fields:
-
-```text
-stage_name = score_candidate_urls
-stage_number = 03
-input_records
-output_records
-selected_count
-rejected_count
-external_reference_count
-started_at
-completed_at
-```
-
----
-
-### Test 16: malformed input record goes to errors artifact
-
-Given an input record missing `discovered_url`.
-
-Expected:
-
-```text
-03_candidate_urls_errors.jsonl exists
-error record includes error_type
-stage does not crash
-summary error_records increments
-```
-
----
-
-### Test 17: returns serializable StageResult
-
-Expected:
-
-```text
-StageResult can be converted to dict
-StageResult can be serialized to JSON
-StageResult includes consumed_artifacts
-StageResult includes produced_artifacts
-StageResult includes counts
-```
-
----
-
-### Test 18: manifest is not updated by the stage
-
-Expected:
-
-```text
-run_score_candidate_urls returns StageResult
-stage itself does not directly modify manifest.json
-```
-
-The orchestrator owns manifest updates.
-
----
-
-### Test 19: stage does not fetch URLs
-
-Given input links.
-
-Expected:
-
-```text
-no network fetch is attempted
-```
-
-This can be verified with mocks.
+This means `url_registry` carries forward the scoring result for every URL, allowing stage 04 to skip re-fetching candidates already known to be weak (fast mode).
 
 ---
 
@@ -1057,8 +295,5 @@ This stage is complete when:
 5. The stage assigns `candidate_status`.
 6. The stage records `score_reasons`.
 7. The stage writes `03_candidate_urls.jsonl`.
-8. The stage writes `03_candidate_urls_summary.json`.
-9. The stage writes `03_candidate_urls_errors.jsonl`.
-10. The stage returns a JSON-serializable `StageResult`.
-11. Unit tests cover vendor, hours, visit/location, calendar/events, about/contact, privacy, old blog, external, score clamping, candidate strength, deduplication, and malformed input.
-12. The stage does not fetch pages, validate URLs, extract facts, convert markdown, call an LLM, or update the manifest directly.
+8. Unit tests cover vendor, hours, visit/location, calendar/events, about/contact, privacy, old blog, external, score clamping, candidate strength, deduplication, and malformed input.
+9. The stage does not fetch pages, validate URLs, extract facts, convert markdown, call an LLM, or update the manifest directly.

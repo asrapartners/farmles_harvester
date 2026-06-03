@@ -15,6 +15,19 @@ Produces: `02_discovered_links.jsonl`, `02_discovered_links_summary.json`, `02_d
 
 Registry input (fast mode only): `urls.candidate_strength` — written by stage 03 after each run; used on the next run to skip BFS links already known to be weak.
 
+Fields read from each input record ([`stages/discover_links.py`](../../farmles_harvester/stages/discover_links.py), `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.py`](../../farmles_harvester/models/record_contracts.py)):
+
+| Field | Required | How this stage uses it |
+|---|---|---|
+| `final_url` | yes | URL to fetch and seed the BFS queue |
+| `source_lead_id` | yes | Tags all output records; key for per-source BFS cap tracking |
+| `validation_status` | yes | Filtered — only `valid` or `redirected` records are processed |
+| `normalized_url` | yes | Validated; passed through to output records |
+| `content_type` | no | Filtered — must start with `text/html` or `application/xhtml+xml`; absent = skipped |
+| `input_url` | no | Passed through to output records if present |
+| `run_id` | yes | Validated; output re-injects it from the harness `run_id` arg |
+| all other fields | — | Ignored |
+
 ---
 
 ## Input Filtering
@@ -70,43 +83,25 @@ The minimum passing strength is `fast_url_min_strength` (default `"strong"`). Pe
 
 ## Output Record Contract
 
-Required fields:
+Each line in `02_discovered_links.jsonl` is one JSON object.
 
-```text
-run_id
-source_lead_id
-source_url
-raw_href
-discovered_url
-link_text
-is_internal
-follow_allowed
-depth
-discovery_method
-discovered_at
-```
-
-Optional: `source_domain`, `discovered_domain`, `input_url`, `normalized_url`
-
-Example:
-
-```json
-{
-  "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
-  "source_url": "https://www.apexfarmersmarket.com/",
-  "source_domain": "apexfarmersmarket.com",
-  "raw_href": "/vendors",
-  "discovered_url": "https://www.apexfarmersmarket.com/vendors",
-  "discovered_domain": "apexfarmersmarket.com",
-  "link_text": "Vendors",
-  "is_internal": true,
-  "follow_allowed": true,
-  "depth": 1,
-  "discovery_method": "html_anchor",
-  "discovered_at": "2026-05-16T11:45:00Z"
-}
-```
+| Field | Required | Description |
+|---|---|---|
+| `run_id` | yes | Run identifier, injected by the harness |
+| `source_lead_id` | yes | Identity of the seed lead; preserved from input |
+| `source_url` | yes | Original seed URL (not the BFS fetch URL) |
+| `raw_href` | yes | Unresolved href value from the `<a>` tag |
+| `discovered_url` | yes | Resolved and normalized absolute URL |
+| `link_text` | yes | Anchor text of the link |
+| `is_internal` | yes | True if `discovered_url` is on the same registered domain as `source_url` |
+| `follow_allowed` | yes | Same as `is_internal`; external links are always `false` |
+| `depth` | yes | BFS depth at which this link was discovered (1 = source page) |
+| `discovery_method` | yes | Always `html_anchor` |
+| `discovered_at` | yes | ISO-8601 timestamp |
+| `source_domain` | no | Registered domain of `source_url` |
+| `discovered_domain` | no | Registered domain of `discovered_url` |
+| `input_url` | no | Passed through from input if present |
+| `normalized_url` | no | Passed through from input if present |
 
 ---
 
@@ -122,25 +117,27 @@ Network failures fetching a source page produce an error record. Filtered hrefs 
 
 ## Summary Artifact Contract
 
-`02_discovered_links_summary.json` — required fields:
+`02_discovered_links_summary.json` — one JSON object written after the stage completes.
 
-```text
-stage_name
-stage_number
-run_id
-input_records
-processed_sources
-skipped_sources
-source_fetch_errors
-output_records
-internal_links
-external_links
-error_records
-capped_sources
-fast_skipped
-started_at
-completed_at
-```
+| Field | Description |
+|---|---|
+| `stage_name` | `discover_links` |
+| `stage_number` | `02` |
+| `run_id` | Run identifier |
+| `input_records` | Total records read from `01_validated_sources.jsonl` |
+| `processed_sources` | Source pages successfully fetched and parsed |
+| `skipped_sources` | Records filtered out by input filtering rules |
+| `source_fetch_errors` | Source pages that could not be fetched |
+| `output_records` | Total link records written |
+| `internal_links` | Links on the same domain as the source |
+| `external_links` | Links on a different domain |
+| `error_records` | Records written to the errors artifact |
+| `max_depth_reached` | Highest BFS depth actually visited this run |
+| `capped_sources` | Sources that hit `per_source_follow_cap` |
+| `fast_skipped` | BFS links skipped by the registry fast-mode gate |
+| `per_source_follow_cap` | Config value in effect for this run |
+| `started_at` | ISO-8601 timestamp |
+| `completed_at` | ISO-8601 timestamp |
 
 ---
 
@@ -187,6 +184,4 @@ Input field contract: `VALIDATED_SOURCE_REQUIRED` in [`models/record_contracts.p
 3. Extracts and normalizes `<a href>` links; ignores non-web hrefs.
 4. Classifies links as internal or external; deduplicates per source page.
 5. Applies BFS follow logic: score threshold, per-source cap, optional fast-mode registry gate on `urls.candidate_strength`.
-6. Writes `02_discovered_links.jsonl`, `02_discovered_links_summary.json`, `02_discovered_links_errors.jsonl`.
-7. Returns a JSON-serializable `StageResult`.
-8. Does not score links, fetch discovered links, extract facts, convert markdown, follow external links, or update the manifest.
+6. Does not score links for selection, fetch discovered links, extract facts, convert markdown, follow external links, or update the manifest.
