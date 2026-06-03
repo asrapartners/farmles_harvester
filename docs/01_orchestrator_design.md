@@ -79,6 +79,18 @@ Stages never construct their own paths or know about other stages. The orchestra
 
 ---
 
+## Stage Artifacts — Summary and Errors
+
+Every stage produces three files. The main JSONL is the data artifact passed to the next stage. The other two are observability artifacts and are never read by downstream stages.
+
+**`{stage}_summary.json`** — a single JSON object written after the stage completes. Contains record counts broken down by outcome (e.g. `valid_count`, `broken_count`, `timeout_count`), start/end timestamps, and stage identity. The orchestrator folds this into `manifest.json` via `StageResult`. Use it to understand what happened in a run without reading thousands of JSONL lines.
+
+**`{stage}_errors.jsonl`** — one record per input that caused an unexpected stage-level failure — meaning the stage could not produce a normal output record for it. This is not where routine failures go. A 404, a timeout, a low score, or a skipped record are all normal outcomes and appear in the main output JSONL with an appropriate status field. Errors are for things the stage could not classify or handle: missing required input fields, unhandled exceptions, parser crashes.
+
+The rule of thumb: if the stage knows what happened, it is an output record with a status. If the stage could not handle it at all, it is an error record.
+
+---
+
 ## Implementation
 
 **Entry point:** [`cli.py`](../farmles_harvester/cli.py) — `main()` parses CLI args, builds config, and calls `run_pipeline()`
