@@ -162,4 +162,4 @@ Each error record is a single JSON object containing at minimum `input` (the ori
 **Owner:** [`registry/url_registry.py`](../../farmles_harvester/registry/url_registry.py) — opened by the orchestrator at the start of `run_pipeline()` and closed in a `finally` block.  
 **Purpose:** SQLite-backed cross-run store that tracks URLs, fetch outcomes, markdown quality, and source-level relevance labels so subsequent runs can skip work already done.
 
-See [`url_registry/url_registry.md`](../url_registry/url_registry.md) for the full stage-by-stage read/write map, and [`url_registry/fast_mode.md`](../url_registry/fast_mode.md) for how the registry drives skip decisions.
+See [`url_registry/url_registry.md`](url_registry/url_registry.md) for the registry data model, and [`static_pipeline/pipeline_wiring.md`](static_pipeline/pipeline_wiring.md) for the stage-by-stage read/write map.

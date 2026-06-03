@@ -32,8 +32,6 @@ OUTCOME_CLASSES = frozenset({
 
 RETRY_POSTURES = frozenset({"permanent", "transient", "unknown"})
 
-RENDER_TYPES = frozenset({"static_html", "dynamic_js", "unknown"})
-
 MARKDOWN_STATUSES = frozenset({"generated", "empty", "boilerplate_only", "not_attempted"})
 
 
@@ -306,43 +304,6 @@ class UrlRegistry:
                         """,
                         (outcome_class, detail_text, posture, ts, ts, run_id, r["url"]),
                     )
-
-    def set_render_type(
-        self,
-        url: str,
-        render_type: str,
-        *,
-        evidence: dict | str | None = None,
-        checked_at: str | None = None,
-    ) -> None:
-        self.set_render_type_many(
-            [{"url": url, "render_type": render_type, "evidence": evidence, "checked_at": checked_at}]
-        )
-
-    def set_render_type_many(self, rows: Iterable[dict]) -> None:
-        rows = list(rows)
-        if not rows:
-            return
-        with self.transaction():
-            for r in rows:
-                render_type = r["render_type"]
-                if render_type not in RENDER_TYPES:
-                    raise ValueError(f"invalid render_type: {render_type!r}")
-                self._conn.execute(
-                    """
-                    UPDATE urls SET
-                        render_type            = ?,
-                        render_type_evidence   = ?,
-                        render_type_checked_at = ?
-                    WHERE url = ?
-                    """,
-                    (
-                        render_type,
-                        self._encode_detail(r.get("evidence")),
-                        r.get("checked_at") or _utcnow_iso(),
-                        r["url"],
-                    ),
-                )
 
     def record_markdown_outcome(
         self,

@@ -1,12 +1,12 @@
 # URL State Reference
 
-The registry stores four categories of state for every URL in the `urls` table. Each category is written by a different stage and answers a distinct question about the URL. Together they determine whether a URL gets re-processed on the next run.
+The registry stores four categories of state for every URL in the `urls` table. Each category answers a distinct question about the URL. Together they determine whether a URL gets re-processed on the next run.
 
-See [`url_registry.md`](url_registry.md) for how the pipeline reads and writes this state.
+See [`url_registry.md`](url_registry.md) for the filtering API and data model.
 
 ---
 
-## Category 1 — Candidate classification (stage 03)
+## Category 1 — Candidate classification
 
 _What kind of page is this, and is it worth fetching?_
 
@@ -15,11 +15,11 @@ _What kind of page is this, and is it worth fetching?_
 | `candidate_type` | `vendor_page`, `hours_location_page`, `calendar_events_page`, `about_contact_page`, `general_market_page`, `low_value_page`, `external_reference`, `unknown` | The page category inferred from URL tokens and link text. Higher-value types score higher. |
 | `candidate_status` | `selected`, `rejected`, `external_reference` | Whether this URL was chosen for fetching. `selected` means it passed the score threshold or was promoted by source-level rules. |
 | `candidate_score` | integer | Raw score from the scoring model. Used to rank candidates within a source. |
-| `candidate_strength` | `strong`, `medium`, `weak` | Derived bin used by fast mode. Stage 02 uses this on the next run to decide whether to re-crawl the link. |
+| `candidate_strength` | `strong`, `medium`, `weak` | Derived bin used by fast mode to decide whether to re-crawl the link on the next run. |
 
 ---
 
-## Category 2 — Fetch outcome (stage 04)
+## Category 2 — Fetch outcome
 
 _What happened when we tried to fetch this URL?_
 
@@ -35,7 +35,7 @@ Fast mode uses `retry_posture = permanent` as a hard skip gate: permanently fail
 
 ---
 
-## Category 3 — Render type (stage 04)
+## Category 3 — Render type
 
 _Does this page require JavaScript to render?_
 
@@ -47,7 +47,7 @@ _Does this page require JavaScript to render?_
 
 ---
 
-## Category 4 — Markdown quality (stage 04)
+## Category 4 — Markdown quality
 
 _How much usable content did we extract?_
 
@@ -64,7 +64,7 @@ _How much usable content did we extract?_
 
 **`url_sources`** — many-to-many join between a URL and the source(s) it was discovered from. A single URL may appear under multiple sources if it was linked from more than one.
 
-**`sources`** — one row per source domain. Holds the relevance verdict produced by stage 06.
+**`sources`** — one row per source domain. Holds the relevance verdict.
 
 | Field | Values | Meaning |
 |---|---|---|

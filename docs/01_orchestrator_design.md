@@ -9,21 +9,22 @@ seed_urls.txt
 ┌──────────────────────────────────────┐       ┌──────────────────────────┐
 │           Static Pipeline             │─write─►     url_registry.db      │
 │  00 → 01 → 02 → 03 → 04 → 05 → 06   │ after  │  (stages 01, 03, 04, 06) │
-└──────────────────────────────────────┘  each  └────────────┬─────────────┘
-                                          stage               │
-                                                  orchestrator queries
-                                                  dynamic_js candidates
-                                                              │
-                                                              ▼
-                                          ┌───────────────────────────────┐
-                                          │       Dynamic Pipeline         │
-                                          │  browser-fetch (crawl4ai)     │
-                                          │  → strip boilerplate          │
-                                          │  → update registry            │
-                                          └───────────────────────────────┘
-                                                              │
-                                                              ▼
-                                               generated_wiki/sources/<slug>/
+└──────────────────┬───────────────────┘  each  └──────────────────────────┘
+                   │ 05_stripped_pages.jsonl      stage
+                   │
+          orchestrator filters
+          render_type = dynamic_js
+                   │
+                   ▼ dynamic_candidates.jsonl
+┌──────────────────────────────────────┐
+│           Dynamic Pipeline            │
+│  browser-fetch (crawl4ai)            │
+│  → strip boilerplate                 │
+│  → update registry                   │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+      generated_wiki/sources/<slug>/
 ```
 
 See [`overview.md`](overview.md) for the system-level view of both pipelines.
@@ -71,7 +72,7 @@ run_discover_links(
 
 ### Stage Artifacts — Summary and Errors
 
-See [`reference/pipeline_artifacts.md`](reference/pipeline_artifacts.md) for schemas and a full run directory layout.
+See [`pipeline_artifacts.md`](pipeline_artifacts.md) for schemas and a full run directory layout.
 
 **`{stage}_summary.json`** — record counts by outcome, timestamps, and stage identity. Folded into `manifest.json` via `StageResult`.
 
@@ -101,24 +102,7 @@ See [`reference/pipeline_artifacts.md`](reference/pipeline_artifacts.md) for sch
 - [`pipeline/stage_result.py`](../farmles_harvester/pipeline/stage_result.py) — `StageResult` dataclass
 
 **Registry ingestion** (non-fatal — warns but does not stop the pipeline):
-[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`url_registry/url_registry.md`](url_registry/url_registry.md) for details.
-
-### UrlRegistry Integration
-
-[`registry/url_registry.py`](../farmles_harvester/registry/url_registry.py) is a SQLite-backed persistent store for tracking URLs across runs. The orchestrator instantiates one `UrlRegistry` at the start of `run_pipeline()` and closes it at the end. The default path is `{run_dir}/url_registry.db`; callers can supply a shared path to reuse the registry across multiple runs (required for fast mode to take effect).
-
-**Reads** happen *during* stage execution and only when `fast_mode: true` is set in config and a cross-run registry is provided. **Writes** happen *after* each stage via `orchestrator/registry_ingest.py`. All ingestion calls are non-fatal — a failure warns but does not stop the pipeline.
-
-| Stage | Direction | When | Operation | Purpose |
-|---|---|---|---|---|
-| 01 — Validate URLs | WRITE | After stage | `upsert()` + `record_outcome(permanent)` | Record seed URLs that failed validation as permanent failures |
-| 02 — Discover Links | READ | During stage (fast mode only) | `get(url)` → `evaluate_url_strength()` | Skip crawling internal links already known as weak or permanently failed |
-| 03 — Score Candidate URLs | WRITE | After stage | `upsert_many()` + `record_source()` | Persist discovered URLs with candidate scores and source mappings |
-| 04 — Generate Markdown Pages | READ | During stage (fast mode only) | `get_many(urls)` → `evaluate_markdown_strength()` | Skip re-fetching candidates that already have sufficient markdown |
-| 04 — Generate Markdown Pages | WRITE | After stage | `record_outcome()` + `record_markdown_outcome()` | Record HTTP fetch results and markdown word counts/paths |
-| 06 — Score Source Relevance | WRITE | After stage | `upsert_source_many()` | Persist source-level relevance labels and keyword stats |
-
-Fast-mode decision logic lives in [`registry/evaluation.py`](../farmles_harvester/registry/evaluation.py): `evaluate_url_strength()` (stage 02) and `evaluate_markdown_strength()` (stage 04).
+[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`static_pipeline/pipeline_wiring.md`](static_pipeline/pipeline_wiring.md) for the full stage-by-stage read/write map.
 
 ### Flow Diagram
 
@@ -155,19 +139,21 @@ flowchart TD
 
 ### Responsibilities
 
-The orchestrator is responsible for creating the input context for the dynamic pipeline. After the static pipeline completes, it queries the registry for all pages the static pipeline could not fetch — pages flagged as `render_type = dynamic_js` with `markdown_status = not_attempted` — and passes that batch to `run_dynamic_pipeline()`.
+The orchestrator is responsible for creating the input file for the dynamic pipeline. After the static pipeline completes, it mines `05_stripped_pages.jsonl` — the final stage artifact — filtering for records where `render_type = dynamic_js`. It writes those records to `dynamic_candidates.jsonl` in the run directory and passes that file to `run_dynamic_pipeline()`.
 
-By the time the static pipeline finishes, the registry holds everything the dynamic pipeline needs: the URL, the `md_path` already assigned by stage 04, and the source slug. The orchestrator's job is to collect and hand it over — no path computation or discovery is needed.
+This keeps the handoff file-based and consistent with the rest of the pipeline. The `dynamic_candidates.jsonl` is inspectable: open it to see exactly which URLs the dynamic pipeline will process and where their output goes.
 
 ### Handoff
 
 ```python
 run_pipeline(...)           # static pipeline completes
 
-dynamic_candidates = registry.query(
-    where="render_type = 'dynamic_js' AND markdown_status = 'not_attempted'"
-)
-run_dynamic_pipeline(candidates=dynamic_candidates, run_dir=run_dir, registry=registry)
+dynamic_candidates = [
+    r for r in read_jsonl(paths_05.output_path)
+    if r.get("render_type") == "dynamic_js"
+]
+write_jsonl(dynamic_candidates_path, dynamic_candidates)
+run_dynamic_pipeline(input_path=dynamic_candidates_path, run_dir=run_dir, registry=registry)
 ```
 
-The dynamic pipeline receives a fully resolved batch and is responsible for browser-fetching, boilerplate stripping, and updating the registry. See [`dynamic_pipeline/overview.md`](dynamic_pipeline/overview.md) for the full design.
+Each record already carries `candidate_url`, `source_slug`, and `markdown_path` from stage 04 — no registry query, no path computation needed. See [`dynamic_pipeline/overview.md`](dynamic_pipeline/overview.md) for the full design.

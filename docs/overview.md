@@ -34,13 +34,12 @@ Output: a wiki folder per source containing markdown pages and `source_metadata.
 
 Runs after the static pipeline completes. Handles pages that require JavaScript execution — pages the static HTTP fetch returned empty or boilerplate-only content for.
 
-The static pipeline flags these as `render_type = dynamic_js` in the registry. The orchestrator queries all such entries and passes the full batch to the dynamic pipeline, which uses crawl4ai's async browser crawler to fetch them.
+The orchestrator reads `05_stripped_pages.jsonl` and filters for records where `render_type = dynamic_js`. It writes those to `dynamic_candidates.jsonl` and passes that file as input to the dynamic pipeline.
 
 ```
-url_registry.db  (render_type = dynamic_js)
+05_stripped_pages.jsonl  (render_type = dynamic_js entries)
     │
-    ▼
-orchestrator builds batch  (url + md_path per entry)
+    ▼  orchestrator filters → dynamic_candidates.jsonl
     │
     ▼
 Browser fetch (crawl4ai)  →  Strip boilerplate  →  Update registry
@@ -53,8 +52,8 @@ Output overwrites the thin or empty markdown left by the static pipeline at the 
 
 ---
 
-## Registry as the handoff
+## Registry
 
-The URL registry (`url_registry.db`) is the shared state between the two pipelines. The static pipeline writes what it learns — candidate scores, fetch outcomes, render types, markdown quality — and the dynamic pipeline reads that state to know what work is left.
+The URL registry (`url_registry.db`) accumulates what the static pipeline learns across runs — candidate scores, fetch outcomes, render types, markdown quality. It drives two decisions on each run: whether a URL is worth processing, and what render method it requires. It is not the handoff mechanism between pipelines; that is file-based.
 
-See [`url_registry/`](url_registry/) for the registry data model, field reference, and fast-mode behaviour.
+See [`url_registry/`](url_registry/) for the registry data model and field reference.

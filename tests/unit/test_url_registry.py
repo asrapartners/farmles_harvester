@@ -46,7 +46,6 @@ class TestInsertPath:
             assert got["last_seen_at"] == "2026-01-01T00:00:00Z"
             assert got["last_run_id"] == RUN_ID
             assert got["times_seen"] == 1
-            assert got["render_type"] == "unknown"
             assert got["markdown_status"] == "not_attempted"
             assert got["consecutive_failures"] == 0
             assert got["last_outcome_class"] is None
@@ -181,31 +180,6 @@ class TestOutcomes:
                     run_id=RUN_ID,
                 )
 
-
-class TestRenderType:
-    def test_sets_render_fields_only(self, tmp_path):
-        with UrlRegistry(tmp_path / "r.sqlite") as reg:
-            reg.upsert(_row(), run_id=RUN_ID, now="2026-01-01T00:00:00Z")
-            reg.set_render_type(
-                "https://example.com/page",
-                "dynamic_js",
-                evidence={"body_length": 200, "marker_found": "next_data"},
-                checked_at="2026-01-05T00:00:00Z",
-            )
-            got = reg.get("https://example.com/page")
-            assert got["render_type"] == "dynamic_js"
-            assert got["render_type_checked_at"] == "2026-01-05T00:00:00Z"
-            assert '"body_length":200' in got["render_type_evidence"]
-            # scoring untouched
-            assert got["candidate_score"] == 65
-            # bookkeeping untouched
-            assert got["last_seen_at"] == "2026-01-01T00:00:00Z"
-
-    def test_rejects_invalid_render_type(self, tmp_path):
-        with UrlRegistry(tmp_path / "r.sqlite") as reg:
-            reg.upsert(_row(), run_id=RUN_ID)
-            with pytest.raises(ValueError):
-                reg.set_render_type("https://example.com/page", "ssr")
 
 
 class TestMarkdown:

@@ -1,23 +1,27 @@
 # Dynamic Pipeline — Browser-Based Crawl
 
-For the system-level view of how the static and dynamic pipelines relate, see [`overview.md`](../overview.md).
+The static pipeline fetches pages with a plain HTTP request. Pages that require JavaScript to render their content return empty or boilerplate-only markdown — the registry flags these as `render_type = dynamic_js`. The dynamic pipeline handles those pages using a browser-based crawl via crawl4ai.
+
+For the system-level view of both pipelines, see [`overview.md`](../overview.md).
 
 ---
 
 ## Orchestrator handoff
 
-After the static pipeline completes, the orchestrator queries the registry for all pages flagged as dynamic and not yet successfully fetched:
+After the static pipeline completes, the orchestrator mines `05_stripped_pages.jsonl` — the final stage artifact — and filters for records where `render_type = dynamic_js`. It writes those records to `dynamic_candidates.jsonl` in the run directory and passes that file as the input to the dynamic pipeline.
 
 ```python
 run_pipeline(...)           # static pipeline completes
 
-dynamic_candidates = registry.query(
-    where="render_type = 'dynamic_js' AND markdown_status = 'not_attempted'"
-)
-run_dynamic_pipeline(candidates=dynamic_candidates, run_dir=run_dir, registry=registry)
+dynamic_candidates = [
+    r for r in read_jsonl(paths_05.output_path)
+    if r.get("render_type") == "dynamic_js"
+]
+write_jsonl(dynamic_candidates_path, dynamic_candidates)
+run_dynamic_pipeline(input_path=dynamic_candidates_path, run_dir=run_dir, registry=registry)
 ```
 
-Each candidate carries the URL and the `md_path` already assigned by the static pipeline. The dynamic pipeline receives a fully resolved batch — no path computation needed.
+Each record already carries `candidate_url`, `source_slug`, and `markdown_path` from stage 04. The dynamic pipeline receives a fully resolved, inspectable file — no registry query, no path computation needed.
 
 ---
 
@@ -43,4 +47,4 @@ The registry update is the critical step: `markdown_status`, `markdown_word_coun
 
 ## Staleness
 
-The same fast-mode staleness rules apply. If a page was browser-fetched in a prior run and produced sufficient markdown (`markdown_strength = strong`), the dynamic pipeline can skip it on the next run. Running with `fast_mode: false` forces a full re-fetch in both pipelines. See [`url_registry/fast_mode.md`](../url_registry/fast_mode.md).
+The same fast-mode staleness rules apply to the dynamic pipeline as to the static pipeline. See [`static_pipeline/fast_mode.md`](../static_pipeline/fast_mode.md).

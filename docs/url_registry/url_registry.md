@@ -1,20 +1,16 @@
 # URL Registry — Cross-Run URL Intelligence
 
-The `UrlRegistry` is a SQLite-backed cross-run store (see `farmles_harvester/registry/`). It is client-agnostic — it knows nothing about the pipeline. This document describes how the pipeline wires into it.
+The `UrlRegistry` is a SQLite-backed cross-run store (see `farmles_harvester/registry/`). It is client-agnostic — it knows nothing about who calls it or how results are used.
 
-The registry exists to answer three questions on every subsequent run:
+The registry exposes two kinds of queries to callers:
 
-> **Staleness:** Registry state can become stale — a misclassified URL or source will be skipped indefinitely. Running with `fast_mode: false` clears both cases. See [`fast_mode.md`](fast_mode.md) for details.
+1. **Should this URL be processed?**
+   Combined filter across URL history and source quality: `should_process_url(registry.get(url), registry.get_source(source_url))` returns an `EvalVerdict(should_process, reasons)`. See [`url_state.md`](url_state.md) for the fields that drive this decision.
 
-1. **Is this URL worth processing at all?**
-   The URL must pass two independent checks — failing either skips it:
-   Both checks are combined in a single call: `should_process_url(registry.get(url), registry.get_source(source_url))`, which returns an `EvalVerdict` with `should_process` and a list of reasons.
+2. **What is the render type of this URL?**
+   `registry.get(url)["render_type"]` returns `static_html`, `dynamic_js`, or `unknown`. The registry stores what was observed — the caller decides what to do with it.
 
-2. **Does this page require browser-based rendering?**
-   The registry records whether a page's content is available in the static HTML response or requires JavaScript execution (`render_type`):
-   - `static_html` — content is available via static fetch
-   - `dynamic_js` — page requires JS; flagged for a subsequent crawl4ai browser-based crawl pass (see [`dynamic_pipeline/overview.md`](../dynamic_pipeline/overview.md))
-   - `unknown` — not yet determined
+> **Staleness:** Registry state can become stale — a misclassified URL or source is skipped indefinitely until the state is refreshed. See [`static_pipeline/fast_mode.md`](../static_pipeline/fast_mode.md) for the reset mechanism.
 
 ## Data model
 
@@ -52,4 +48,4 @@ The registry is a single SQLite file with three operational tables and one bookk
 
 For the full field reference — valid values and what each field means — see [`url_state.md`](url_state.md).
 
-For how the pipeline opens, reads, and writes the registry across stages — see [`pipeline_wiring.md`](pipeline_wiring.md).
+For how the pipeline opens, reads, and writes the registry across stages — see [`static_pipeline/pipeline_wiring.md`](../static_pipeline/pipeline_wiring.md).
