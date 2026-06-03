@@ -145,10 +145,14 @@ def ingest_markdown_outcomes(
         registry.record_markdown_outcome(
             url,
             status="generated",
+            strength=rec.get("markdown_strength"),
             word_count=rec.get("markdown_word_count"),
             path=rec.get("markdown_path"),
             run_id=run_id,
         )
+        render_type = rec.get("render_type")
+        if render_type:
+            registry.set_render_type(url, render_type=render_type)
 
 
 def ingest_source_relevance(

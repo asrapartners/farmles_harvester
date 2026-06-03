@@ -12,9 +12,10 @@ from farmles_harvester.models.record_contracts import CANDIDATE_URL_REQUIRED, mi
 from farmles_harvester.pipeline.jsonl import JsonlWriter, stream_jsonl, write_json
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
-from farmles_harvester.registry.evaluation import evaluate_markdown_strength
+from farmles_harvester.registry.evaluation import evaluate_markdown_strength, rate_markdown_strength
 from farmles_harvester.web.fetcher import FetchTimeoutError
 from farmles_harvester.web.html_cleaner import clean_html
+from farmles_harvester.web.render_type_detector import detect_render_type
 from farmles_harvester.web.url_utils import source_url_to_slug
 
 _HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
@@ -246,6 +247,8 @@ def run_generate_markdown_pages(
                 output_count += 1
                 continue
 
+            render_type, _render_evidence = detect_render_type(response.text)
+
             min_retention = cfg.get("html_clean_min_word_retention", 0.15)
             html, content_retention = clean_html(response.text, min_word_retention=min_retention)
 
@@ -259,6 +262,9 @@ def run_generate_markdown_pages(
 
             rel_path_str = f"generated_wiki/sources/{source_slug}/{rel_path}"
             fetched_paths[url] = str(rel_path)
+            word_count = len(markdown_text.split())
+            md_strong_min = cfg.get("md_strong_min_words", 300)
+            md_medium_min = cfg.get("md_medium_min_words", 100)
             out.write({
                 "run_id": run_id,
                 "source_lead_id": lead_id,
@@ -271,7 +277,9 @@ def run_generate_markdown_pages(
                 "content_type": response.content_type,
                 "markdown_path": rel_path_str,
                 "markdown_filename": rel_path.name,
-                "markdown_word_count": len(markdown_text.split()),
+                "render_type": render_type,
+                "markdown_strength": rate_markdown_strength(word_count, strong_min=md_strong_min, medium_min=md_medium_min),
+                "markdown_word_count": word_count,
                 "content_hash": compute_content_hash(markdown_text),
                 "content_retention_ratio": round(content_retention, 4),
                 "generated_at": generated_at,

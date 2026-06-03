@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS urls (
     render_type_checked_at  TEXT,
     render_type_evidence    TEXT,
     markdown_status         TEXT NOT NULL DEFAULT 'not_attempted',
+    markdown_strength       TEXT,
     markdown_word_count     INTEGER,
     markdown_path           TEXT,
     first_seen_at           TEXT NOT NULL,

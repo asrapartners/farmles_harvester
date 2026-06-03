@@ -36,6 +36,20 @@ def evaluate_url_strength(
     return EvalVerdict(False, [f"strength {row.get('candidate_strength')} < {min_strength}"])
 
 
+def rate_markdown_strength(
+    word_count: int,
+    *,
+    strong_min: int = 300,
+    medium_min: int = 100,
+) -> str:
+    """Return 'strong', 'medium', or 'weak' based on markdown word count."""
+    if word_count >= strong_min:
+        return CandidateStrength.STRONG
+    if word_count >= medium_min:
+        return CandidateStrength.MEDIUM
+    return CandidateStrength.WEAK
+
+
 def evaluate_markdown_strength(
     row: dict | None,
     *,

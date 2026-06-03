@@ -66,6 +66,10 @@ class UrlRegistry:
                 self._conn.execute(f"ALTER TABLE urls DROP COLUMN {col}")
             except Exception:
                 pass
+        try:
+            self._conn.execute("ALTER TABLE urls ADD COLUMN markdown_strength TEXT")
+        except Exception:
+            pass
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()
@@ -345,6 +349,7 @@ class UrlRegistry:
         url: str,
         *,
         status: str,
+        strength: str | None = None,
         word_count: int | None = None,
         path: str | None = None,
         run_id: str,
@@ -357,13 +362,14 @@ class UrlRegistry:
             """
             UPDATE urls SET
                 markdown_status     = ?,
+                markdown_strength   = ?,
                 markdown_word_count = ?,
                 markdown_path       = ?,
                 last_seen_at        = ?,
                 last_run_id         = ?
             WHERE url = ?
             """,
-            (status, word_count, path, ts, run_id, url),
+            (status, strength, word_count, path, ts, run_id, url),
         )
 
     def record_source(self, url: str, source_url: str) -> None:
