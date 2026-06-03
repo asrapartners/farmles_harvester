@@ -26,18 +26,18 @@ VENDOR_HTML = """\
 </body></html>
 """
 
-_FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "source_lead_id", "timestamp", "content_hash"}
+_FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "timestamp", "content_hash"}
 
 
 INPUT_URL = "apex.example"
 NORMALIZED_URL = SOURCE_URL
 
 
-def _candidate(url: str, candidate_type: str, lead_id: str = "lead_1",
+def _candidate(url: str, candidate_type: str, source_slug: str = "apex-example",
                status: str = CandidateStatus.SELECTED, score: int = 80) -> dict:
     return {
         "run_id": RUN_ID,
-        "source_lead_id": lead_id,
+        "source_slug": source_slug,
         "source_url": SOURCE_URL,
         "input_url": INPUT_URL,
         "normalized_url": NORMALIZED_URL,

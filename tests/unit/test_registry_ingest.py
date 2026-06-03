@@ -21,8 +21,8 @@ class TestIngestUrls:
         discovered = tmp_path / "02.jsonl"
         candidate = tmp_path / "03.jsonl"
         write_jsonl(discovered, [
-            {"discovered_url": "https://a.com/p1", "source_url": "https://a.com/", "source_lead_id": "lead_1"},
-            {"discovered_url": "https://a.com/p2", "source_url": "https://a.com/", "source_lead_id": "lead_1"},
+            {"discovered_url": "https://a.com/p1", "source_url": "https://a.com/", "source_slug": "a-com"},
+            {"discovered_url": "https://a.com/p2", "source_url": "https://a.com/", "source_slug": "a-com"},
         ])
         write_jsonl(candidate, [
             {"candidate_url": "https://a.com/p1", "candidate_score": 70,
@@ -43,8 +43,8 @@ class TestIngestUrls:
         discovered = tmp_path / "02.jsonl"
         candidate = tmp_path / "03.jsonl"
         write_jsonl(discovered, [
-            {"discovered_url": "https://x.com/shared", "source_url": "https://a.com/", "source_lead_id": "lead_a"},
-            {"discovered_url": "https://x.com/shared", "source_url": "https://b.com/", "source_lead_id": "lead_b"},
+            {"discovered_url": "https://x.com/shared", "source_url": "https://a.com/", "source_slug": "a-com"},
+            {"discovered_url": "https://x.com/shared", "source_url": "https://b.com/", "source_slug": "b-com"},
         ])
         write_jsonl(candidate, [])
         with _registry(tmp_path) as reg:
@@ -84,8 +84,8 @@ class TestIngestOutcomes:
         markdown = tmp_path / "04.jsonl"
         errors = tmp_path / "02_errors.jsonl"
         write_jsonl(discovered, [
-            {"discovered_url": "https://a.com/ok", "source_url": "https://a.com/", "source_lead_id": "l"},
-            {"discovered_url": "https://a.com/slow", "source_url": "https://a.com/", "source_lead_id": "l"},
+            {"discovered_url": "https://a.com/ok", "source_url": "https://a.com/", "source_slug": "a-com"},
+            {"discovered_url": "https://a.com/slow", "source_url": "https://a.com/", "source_slug": "a-com"},
         ])
         write_jsonl(candidate, [])
         write_jsonl(markdown, [

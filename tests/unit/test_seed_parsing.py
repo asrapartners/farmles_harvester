@@ -11,10 +11,10 @@ class TestParseSeedLines:
         assert len(leads) == 1
         assert leads[0].input_url == "https://example.com"
 
-    def test_assigns_sequential_ids(self):
+    def test_assigns_slug_from_url(self):
         leads = parse_seed_lines("https://example.com\nhttps://other.com")
-        assert leads[0].source_lead_id == "lead_1"
-        assert leads[1].source_lead_id == "lead_2"
+        assert leads[0].source_slug == "example-com"
+        assert leads[1].source_slug == "other-com"
 
     def test_preserves_input_url(self):
         leads = parse_seed_lines("apexfarmersmarket.com")

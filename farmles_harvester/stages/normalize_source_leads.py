@@ -6,12 +6,12 @@ from pathlib import Path
 from farmles_harvester.pipeline.jsonl import write_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import StageResult
-from farmles_harvester.web.url_utils import normalize_url
+from farmles_harvester.web.url_utils import normalize_url, source_url_to_slug
 
 
 @dataclass
 class SourceLead:
-    source_lead_id: str
+    source_slug: str
     input_url: str
     normalized_url: str
     input_line: int
@@ -21,7 +21,6 @@ class SourceLead:
 def parse_seed_lines(seed_text: str) -> list[SourceLead]:
     leads: list[SourceLead] = []
     seen_urls: set[str] = set()
-    lead_count = 0
 
     for line_num, line in enumerate(seed_text.splitlines(), start=1):
         stripped = line.strip()
@@ -36,10 +35,9 @@ def parse_seed_lines(seed_text: str) -> list[SourceLead]:
             continue
 
         seen_urls.add(result.normalized_url)
-        lead_count += 1
 
         leads.append(SourceLead(
-            source_lead_id=f"lead_{lead_count}",
+            source_slug=source_url_to_slug(result.normalized_url),
             input_url=stripped,
             normalized_url=result.normalized_url,
             input_line=line_num,
@@ -91,7 +89,7 @@ def run_normalize_source_leads(
     output_records = [
         {
             "run_id": run_id,
-            "source_lead_id": lead.source_lead_id,
+            "source_slug": lead.source_slug,
             "input_url": lead.input_url,
             "normalized_url": lead.normalized_url,
             "input_line": lead.input_line,

@@ -88,7 +88,7 @@ def run_validate_urls(
             error_records.append({
                 "run_id": run_id,
                 "stage_name": "validate_urls",
-                "source_lead_id": record.get("source_lead_id"),
+                "source_slug": record.get("source_slug"),
                 "normalized_url": record.get("normalized_url"),
                 "error_type": "invalid_input_record",
                 "message": f"Missing required fields: {sorted(missing)}",
@@ -107,7 +107,7 @@ def run_validate_urls(
             final_url = response.final_url if response.final_url is not None else response.url
             output_records.append({
                 "run_id": run_id,
-                "source_lead_id": record["source_lead_id"],
+                "source_slug": record["source_slug"],
                 "input_url": record.get("input_url", ""),
                 "normalized_url": normalized_url,
                 "final_url": final_url,
@@ -124,7 +124,7 @@ def run_validate_urls(
             status = _STATUS_TIMEOUT
             output_records.append({
                 "run_id": run_id,
-                "source_lead_id": record["source_lead_id"],
+                "source_slug": record["source_slug"],
                 "input_url": record.get("input_url", ""),
                 "normalized_url": normalized_url,
                 "final_url": normalized_url,
@@ -141,7 +141,7 @@ def run_validate_urls(
             status = _STATUS_FETCH_ERROR
             output_records.append({
                 "run_id": run_id,
-                "source_lead_id": record["source_lead_id"],
+                "source_slug": record["source_slug"],
                 "input_url": record.get("input_url", ""),
                 "normalized_url": normalized_url,
                 "final_url": normalized_url,

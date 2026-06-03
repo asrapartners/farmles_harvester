@@ -86,8 +86,8 @@ def run_discover_links(
         else:
             final_url = record["final_url"]
             visited.add(final_url)
-            queue.append((final_url, 1, record["source_lead_id"], final_url))
-            lead_url_meta[record["source_lead_id"]] = {
+            queue.append((final_url, 1, record["source_slug"], final_url))
+            lead_url_meta[record["source_slug"]] = {
                 "input_url": record.get("input_url"),
                 "normalized_url": record.get("normalized_url"),
             }
@@ -101,7 +101,7 @@ def run_discover_links(
                 err.write({
                     "run_id": run_id,
                     "stage_name": "discover_links",
-                    "source_lead_id": record.get("source_lead_id"),
+                    "source_slug": record.get("source_slug"),
                     "source_url": record.get("final_url"),
                     "error_type": "invalid_input_record",
                     "message": f"Missing required fields: {sorted(missing)}",
@@ -111,7 +111,7 @@ def run_discover_links(
                 error_count += 1
 
         while queue:
-            fetch_url, current_depth, lead_id, seed_url = queue.popleft()
+            fetch_url, current_depth, source_slug, seed_url = queue.popleft()
             if current_depth > max_depth_reached:
                 max_depth_reached = current_depth
 
@@ -126,7 +126,7 @@ def run_discover_links(
                 err.write({
                     "run_id": run_id,
                     "stage_name": "discover_links",
-                    "source_lead_id": lead_id,
+                    "source_slug": source_slug,
                     "source_url": fetch_url,
                     "error_type": "fetch_error",
                     "message": str(exc),
@@ -149,10 +149,10 @@ def run_discover_links(
 
                 out.write({
                     "run_id": run_id,
-                    "source_lead_id": lead_id,
+                    "source_slug": source_slug,
                     "source_url": seed_url,
-                    "input_url": lead_url_meta.get(lead_id, {}).get("input_url"),
-                    "normalized_url": lead_url_meta.get(lead_id, {}).get("normalized_url"),
+                    "input_url": lead_url_meta.get(source_slug, {}).get("input_url"),
+                    "normalized_url": lead_url_meta.get(source_slug, {}).get("normalized_url"),
                     "raw_href": link.raw_href,
                     "discovered_url": discovered_url,
                     "link_text": link.link_text,
@@ -182,12 +182,12 @@ def run_discover_links(
                         ).should_process:
                             fast_skipped += 1
                             continue
-                        queued = lead_queued.get(lead_id, 0)
+                        queued = lead_queued.get(source_slug, 0)
                         if queued < per_source_follow_cap:
-                            lead_queued[lead_id] = queued + 1
-                            queue.append((link.discovered_url, current_depth + 1, lead_id, seed_url))
+                            lead_queued[source_slug] = queued + 1
+                            queue.append((link.discovered_url, current_depth + 1, source_slug, seed_url))
                         elif queued == per_source_follow_cap:
-                            lead_queued[lead_id] = queued + 1
+                            lead_queued[source_slug] = queued + 1
                             capped_sources += 1
 
     completed_at = datetime.now(timezone.utc).isoformat()

@@ -31,10 +31,10 @@ def _make_input(tmp_path, records: list[dict]):
     return path
 
 
-def _lead(url: str, lead_id: str = "lead_1") -> dict:
+def _lead(url: str, source_slug: str = "example-com") -> dict:
     return {
         "run_id": RUN_ID,
-        "source_lead_id": lead_id,
+        "source_slug": source_slug,
         "input_url": url.replace("https://", ""),
         "normalized_url": url,
         "input_line": 1,
@@ -146,7 +146,7 @@ class TestRunValidateUrls:
     def test_missing_normalized_url_writes_error_and_does_not_crash(self, tmp_path):
         bad_record = {
             "run_id": RUN_ID,
-            "source_lead_id": "lead_bad",
+            "source_slug": "bad-example",
             # normalized_url intentionally omitted
             "input_url": "bad.example",
             "input_line": 1,

@@ -208,7 +208,7 @@ def run_score_candidate_urls(
             error_rows.append({
                 "run_id": run_id,
                 "stage_name": "score_candidate_urls",
-                "source_lead_id": record.get("source_lead_id"),
+                "source_slug": record.get("source_slug"),
                 "discovered_url": record.get("discovered_url"),
                 "error_type": "invalid_input_record",
                 "message": f"Missing required fields: {sorted(missing)}",
@@ -226,7 +226,7 @@ def run_score_candidate_urls(
         result = score_discovered_link(link_record, config=config)
         scored_rows.append({
             "run_id": run_id,
-            "source_lead_id": record["source_lead_id"],
+            "source_slug": record["source_slug"],
             "source_url": record["source_url"],
             "input_url": record.get("input_url"),
             "normalized_url": record.get("normalized_url"),
@@ -242,7 +242,7 @@ def run_score_candidate_urls(
 
     # --- Pass 2: find sources with meaningful selections or program links ---
     leads_with_meaningful_selections: set[str] = {
-        row["source_lead_id"]
+        row["source_slug"]
         for row in scored_rows
         if row["candidate_status"] == CandidateStatus.SELECTED
         and row["candidate_score"] > 20
@@ -252,7 +252,7 @@ def run_score_candidate_urls(
     # Sources whose discovered links include an authoritative program domain
     # (e.g. fns.usda.gov) — strong signal the source is a certified market.
     leads_with_program_links: set[str] = {
-        row["source_lead_id"]
+        row["source_slug"]
         for row in scored_rows
         if row["candidate_status"] == CandidateStatus.EXTERNAL_REFERENCE
         and urlparse(row["candidate_url"]).netloc in _PROGRAM_LINK_DOMAINS
@@ -263,7 +263,7 @@ def run_score_candidate_urls(
     program_boosted_count = 0
 
     for row in scored_rows:
-        lead = row["source_lead_id"]
+        lead = row["source_slug"]
         is_internal_rejected = (
             row["candidate_status"] == CandidateStatus.REJECTED
             and row["candidate_type"] != CandidateType.EXTERNAL_REFERENCE

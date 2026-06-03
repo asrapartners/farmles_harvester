@@ -1,6 +1,6 @@
 NORMALIZED_SOURCE_LEAD_REQUIRED: frozenset[str] = frozenset({
     "run_id",
-    "source_lead_id",
+    "source_slug",
     "input_url",
     "normalized_url",
     "input_line",
@@ -9,7 +9,7 @@ NORMALIZED_SOURCE_LEAD_REQUIRED: frozenset[str] = frozenset({
 
 VALIDATED_SOURCE_REQUIRED: frozenset[str] = frozenset({
     "run_id",
-    "source_lead_id",
+    "source_slug",
     "normalized_url",
     "final_url",
     "validation_status",
@@ -18,7 +18,7 @@ VALIDATED_SOURCE_REQUIRED: frozenset[str] = frozenset({
 
 DISCOVERED_LINK_REQUIRED: frozenset[str] = frozenset({
     "run_id",
-    "source_lead_id",
+    "source_slug",
     "source_url",
     "discovered_url",
     "link_text",
@@ -28,7 +28,7 @@ DISCOVERED_LINK_REQUIRED: frozenset[str] = frozenset({
 
 CANDIDATE_URL_REQUIRED: frozenset[str] = frozenset({
     "run_id",
-    "source_lead_id",
+    "source_slug",
     "source_url",
     "candidate_url",
     "candidate_type",
@@ -38,7 +38,6 @@ CANDIDATE_URL_REQUIRED: frozenset[str] = frozenset({
 
 MARKDOWN_PAGE_REQUIRED: frozenset[str] = frozenset({
     "run_id",
-    "source_lead_id",
     "source_slug",
     "candidate_url",
     "candidate_type",

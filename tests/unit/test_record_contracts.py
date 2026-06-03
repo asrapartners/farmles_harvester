@@ -11,8 +11,8 @@ from farmles_harvester.models.record_contracts import (
     require_fields,
 )
 
-_REQUIRED = {"run_id", "source_lead_id"}
-_COMPLETE = {"run_id": "r1", "source_lead_id": "lead_1"}
+_REQUIRED = {"run_id", "source_slug"}
+_COMPLETE = {"run_id": "r1", "source_slug": "example-com"}
 _INCOMPLETE = {"run_id": "r1"}
 
 
@@ -21,7 +21,7 @@ class TestMissingFields:
         assert missing_fields(_COMPLETE, _REQUIRED) == set()
 
     def test_returns_missing_field_names(self):
-        assert missing_fields(_INCOMPLETE, _REQUIRED) == {"source_lead_id"}
+        assert missing_fields(_INCOMPLETE, _REQUIRED) == {"source_slug"}
 
 
 class TestHasRequiredFields:
@@ -37,7 +37,7 @@ class TestRequireFields:
         require_fields(_COMPLETE, _REQUIRED)  # must not raise
 
     def test_raises_value_error_with_missing_field_names(self):
-        with pytest.raises(ValueError, match="source_lead_id"):
+        with pytest.raises(ValueError, match="source_slug"):
             require_fields(_INCOMPLETE, _REQUIRED)
 
     def test_extra_fields_are_allowed(self):

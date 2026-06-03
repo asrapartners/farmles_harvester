@@ -237,14 +237,14 @@ def _print_next_run_candidates(manifest: dict, run_dir: Path) -> None:
 
     leads_path = run_dir / "00_normalized_source_leads.jsonl"
     validated_path = run_dir / "01_validated_sources.jsonl"
-    leads = {r["source_lead_id"]: r.get("input_url", "") for r in _read_jsonl(leads_path)}
+    leads = {r["source_slug"]: r.get("input_url", "") for r in _read_jsonl(leads_path)}
 
     failures: dict[str, list[str]] = {}
     for r in _read_jsonl(validated_path):
         status = r.get("validation_status", "")
         if status not in _STAGE_01_FAILURE_STATUSES:
             continue
-        url = leads.get(r.get("source_lead_id", ""), r.get("normalized_url", ""))
+        url = leads.get(r.get("source_slug", ""), r.get("normalized_url", ""))
         failures.setdefault(status, []).append(url)
 
     if not failures:
@@ -301,12 +301,12 @@ def _build_seed_stats(run_dir: Path) -> tuple[list[dict], dict[str, int]]:
     if not leads:
         return [], {}
 
-    seed_url: dict[str, str] = {r["source_lead_id"]: r.get("input_url", "") for r in leads}
-    order: list[str] = [r["source_lead_id"] for r in leads]
+    seed_url: dict[str, str] = {r["source_slug"]: r.get("input_url", "") for r in leads}
+    order: list[str] = [r["source_slug"] for r in leads]
 
     validated = _read_jsonl(run_dir / "01_validated_sources.jsonl")
     lead_validated: dict[str, int] = {
-        r["source_lead_id"]: 1
+        r["source_slug"]: 1
         for r in validated
         if r.get("validation_status") in _VALIDATION_SUCCESS
     }
@@ -318,71 +318,62 @@ def _build_seed_stats(run_dir: Path) -> tuple[list[dict], dict[str, int]]:
         rows_seen = 0
         for r in _read_jsonl(run_dir / fname):
             rows_seen += 1
-            lid = r.get("source_lead_id")
-            if lid:
+            slug = r.get("source_slug")
+            if slug:
                 if col == "stage04" and r.get("fetch_status") != "fetched":
                     continue
-                c[lid] += 1
+                c[slug] += 1
         per_stage_counts[col] = c
         raw_totals[col] = rows_seen
 
-    # lead → slug from stage 04 (first slug seen wins; one per lead in practice)
-    lead_to_slug: dict[str, str] = {}
-    md_bytes_by_lead: Counter = Counter()
+    md_bytes_by_slug: Counter = Counter()
     seen_md_paths: set[str] = set()
     for r in _read_jsonl(run_dir / "04_markdown_pages.jsonl"):
-        lid = r.get("source_lead_id")
         slug = r.get("source_slug")
-        if lid and slug and lid not in lead_to_slug:
-            lead_to_slug[lid] = slug
-        if lid and r.get("fetch_status") == "fetched":
+        if slug and r.get("fetch_status") == "fetched":
             mdp = r.get("markdown_path")
             if mdp and mdp not in seen_md_paths:
                 seen_md_paths.add(mdp)
                 p = run_dir / mdp
                 if p.exists():
-                    md_bytes_by_lead[lid] += p.stat().st_size
+                    md_bytes_by_slug[slug] += p.stat().st_size
 
-    slug_to_lead: dict[str, str] = {s: l for l, s in lead_to_slug.items()}
-
-    stage05_by_lead: Counter = Counter()
+    stage05_by_slug: Counter = Counter()
     for r in _read_jsonl(run_dir / "05_stripped_pages.jsonl"):
         if not r.get("modified"):
             continue
         slug = r.get("source_slug", "")
-        lid = slug_to_lead.get(slug)
-        if lid:
-            stage05_by_lead[lid] += 1
+        if slug:
+            stage05_by_slug[slug] += 1
 
-    stage06_by_lead: Counter = Counter()
+    stage06_by_slug: Counter = Counter()
     stage06_rows = 0
     for r in _read_jsonl(run_dir / "06_source_relevance.jsonl"):
         stage06_rows += 1
         slug = r.get("source_slug", "")
-        lid = slug_to_lead.get(slug)
-        if lid:
-            stage06_by_lead[lid] += 1
+        if slug:
+            stage06_by_slug[slug] += 1
     raw_totals["stage06"] = stage06_rows
 
     rows: list[dict] = []
-    for lid in order:
+    for slug in order:
         rows.append({
-            "seed_url": seed_url.get(lid, ""),
-            "source_lead_id": lid,
+            "seed_url": seed_url.get(slug, ""),
+            "source_slug": slug,
             "stage00": 1,
-            "stage01": lead_validated.get(lid, 0),
-            "stage02": per_stage_counts["stage02"].get(lid, 0),
-            "stage03": per_stage_counts["stage03"].get(lid, 0),
-            "stage04": per_stage_counts["stage04"].get(lid, 0),
-            "stage05": stage05_by_lead.get(lid, 0),
-            "stage06": stage06_by_lead.get(lid, 0),
-            "md_size": md_bytes_by_lead.get(lid, 0),
+            "stage01": lead_validated.get(slug, 0),
+            "stage02": per_stage_counts["stage02"].get(slug, 0),
+            "stage03": per_stage_counts["stage03"].get(slug, 0),
+            "stage04": per_stage_counts["stage04"].get(slug, 0),
+            "stage05": stage05_by_slug.get(slug, 0),
+            "stage06": stage06_by_slug.get(slug, 0),
+            "md_size": md_bytes_by_slug.get(slug, 0),
         })
     return rows, raw_totals
 
 
 _STATS_CSV_COLUMNS = [
-    "seed_url", "source_lead_id",
+    "seed_url", "source_slug",
     "stage00", "stage01", "stage02", "stage03", "stage04", "stage05", "stage06",
     "md_size",
 ]

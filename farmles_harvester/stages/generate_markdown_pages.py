@@ -163,7 +163,6 @@ def run_generate_markdown_pages(
             err.write({
                 "run_id": run_id,
                 "stage_name": "generate_markdown_pages",
-                "source_lead_id": record.get("source_lead_id"),
                 "candidate_url": record.get("candidate_url"),
                 "error_type": "invalid_input_record",
                 "message": f"Missing required fields: {sorted(missing)}",
@@ -173,7 +172,6 @@ def run_generate_markdown_pages(
 
         for record in selected_records:
             url = record["candidate_url"]
-            lead_id = record["source_lead_id"]
             generated_at = datetime.now(timezone.utc).isoformat()
 
             source_slug = source_url_to_slug(record["source_url"])
@@ -198,7 +196,6 @@ def run_generate_markdown_pages(
                 fetched_paths[url] = None
                 out.write({
                     "run_id": run_id,
-                    "source_lead_id": lead_id,
                     "source_slug": source_slug,
                     "candidate_url": url,
                     "candidate_type": record["candidate_type"],
@@ -215,7 +212,7 @@ def run_generate_markdown_pages(
                 err.write({
                     "run_id": run_id,
                     "stage_name": "generate_markdown_pages",
-                    "source_lead_id": lead_id,
+                    "source_slug": source_slug,
                     "candidate_url": url,
                     "error_type": "fetch_failed",
                     "message": str(exc),
@@ -231,7 +228,6 @@ def run_generate_markdown_pages(
                 non_html_count += 1
                 out.write({
                     "run_id": run_id,
-                    "source_lead_id": lead_id,
                     "source_slug": source_slug,
                     "candidate_url": url,
                     "candidate_type": record["candidate_type"],
@@ -267,7 +263,6 @@ def run_generate_markdown_pages(
             md_medium_min = cfg.get("md_medium_min_words", 100)
             out.write({
                 "run_id": run_id,
-                "source_lead_id": lead_id,
                 "source_slug": source_slug,
                 "candidate_url": url,
                 "candidate_type": record["candidate_type"],

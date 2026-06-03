@@ -13,11 +13,11 @@ RUN_ID = "2026-05-17_130000_test"
 SOURCE_URL = "https://apex.example/"
 
 
-def _discovered(url: str, link_text: str, lead_id: str = "lead_1",
+def _discovered(url: str, link_text: str, source_slug: str = "apex-farmersmarket-com",
                 is_internal: bool = True, follow_allowed: bool = True) -> dict:
     return {
         "run_id": RUN_ID,
-        "source_lead_id": lead_id,
+        "source_slug": source_slug,
         "source_url": SOURCE_URL,
         "discovered_url": url,
         "link_text": link_text,
@@ -147,7 +147,7 @@ class TestRunScoreCandidateUrls:
         assert summary["external_reference_count"] == 1
 
     def test_malformed_input_writes_error_and_does_not_crash(self, tmp_path):
-        bad = {"run_id": RUN_ID, "source_lead_id": "lead_bad"}  # missing required fields
+        bad = {"run_id": RUN_ID, "source_slug": "bad-example"}  # missing required fields
         input_path = _make_input(tmp_path, [bad])
         paths = _make_paths(tmp_path)
         run_score_candidate_urls(input_path, paths, RUN_ID)

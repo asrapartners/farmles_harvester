@@ -19,7 +19,6 @@ def _make_md_record(tmp_path: Path, slug: str, rel: str, content: str) -> dict:
     md_path.write_text(content, encoding="utf-8")
     return {
         "run_id": RUN_ID,
-        "source_lead_id": "lead_1",
         "source_slug": slug,
         "candidate_url": f"https://{slug}.example/{rel}",
         "candidate_type": "vendor_page",
@@ -46,7 +45,6 @@ def _three_vendor_input(tmp_path: Path) -> tuple[Path, StagePaths]:
     # add a non-fetched record that should be ignored
     records.append({
         "run_id": RUN_ID,
-        "source_lead_id": "lead_1",
         "source_slug": SOURCE_SLUG,
         "candidate_url": "https://apex-example.example/broken",
         "candidate_type": "vendor_page",

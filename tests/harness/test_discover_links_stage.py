@@ -26,11 +26,11 @@ APEX_HTML = """\
 """
 
 
-def _validated_record(url: str, lead_id: str = "lead_1", status: str = "valid",
+def _validated_record(url: str, source_slug: str = "apex-farmersmarket-com", status: str = "valid",
                       content_type: str = "text/html") -> dict:
     return {
         "run_id": RUN_ID,
-        "source_lead_id": lead_id,
+        "source_slug": source_slug,
         "normalized_url": url,
         "final_url": url,
         "validation_status": status,
@@ -111,8 +111,8 @@ class TestRunDiscoverLinks:
 
     def test_processes_valid_and_redirected_html_records(self, tmp_path):
         records = [
-            _validated_record(SOURCE_URL, lead_id="lead_1", status="valid"),
-            _validated_record(SOURCE_URL_2, lead_id="lead_2", status="redirected"),
+            _validated_record(SOURCE_URL, source_slug="apex-farmersmarket-com", status="valid"),
+            _validated_record(SOURCE_URL_2, source_slug="localharvest-org", status="redirected"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
@@ -123,10 +123,10 @@ class TestRunDiscoverLinks:
 
     def test_skips_non_processable_records_and_counts_them(self, tmp_path):
         records = [
-            _validated_record(SOURCE_URL, lead_id="lead_1", status="valid"),
-            _validated_record(SOURCE_URL_2, lead_id="lead_2", status="broken"),
-            {**_validated_record("https://null-ct.example/", lead_id="lead_3"), "content_type": None},
-            _validated_record("https://pdf.example/", lead_id="lead_4", content_type="application/pdf"),
+            _validated_record(SOURCE_URL, source_slug="apex-farmersmarket-com", status="valid"),
+            _validated_record(SOURCE_URL_2, source_slug="localharvest-org", status="broken"),
+            {**_validated_record("https://null-ct.example/", source_slug="null-ct-example"), "content_type": None},
+            _validated_record("https://pdf.example/", source_slug="pdf-example", content_type="application/pdf"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
@@ -138,7 +138,7 @@ class TestRunDiscoverLinks:
     def test_fetches_final_url_not_normalized_url(self, tmp_path):
         record = {
             "run_id": RUN_ID,
-            "source_lead_id": "lead_1",
+            "source_slug": "apex-example",
             "normalized_url": "https://apex.example",
             "final_url": SOURCE_URL,
             "validation_status": "redirected",

@@ -48,7 +48,7 @@ class TestRunNormalizeSourceLeads:
         records = read_jsonl(paths.output_path)
         for rec in records:
             assert "run_id" in rec
-            assert "source_lead_id" in rec
+            assert "source_slug" in rec
             assert "normalized_url" in rec
             assert "normalized_at" in rec
             assert "input_line" in rec
