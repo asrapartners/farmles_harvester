@@ -28,13 +28,56 @@ StagePaths(
 ```
 
 Each stage returns StageResult
-The orchestrator writes that result into manifest.json. Stages never write directly to `manifest.json`. use relative paths to the run directory inside `manifest.json`.
+The orchestrator writes that result into manifest.json. 
+
+- Stages never write directly to `manifest.json`. 
+- use relative paths to the run directory inside `manifest.json`.
 {
   "produced_artifacts": ["00_normalized_source_leads.jsonl"],
   "summary_artifact": "00_normalized_source_leads_summary.json",
   "error_artifact": "00_normalized_source_leads_errors.jsonl"
 }
-If a stage fails then stop the run. Record failed StageResult in manifest.json and leave the artifacts in the run dir.
+
+- If a stage fails then stop the run. 
+	- Record failed StageResult in manifest.json and leave the artifacts in the run dir.
+
+## File-Based Data Passing
+
+The pipeline is file-based. Every stage reads from a JSONL file produced by the previous stage and writes its own JSONL output to the run directory. There is no in-memory handoff between stages.
+
+**File naming convention:**
+
+```
+{stage_number}_{artifact_name}.jsonl          ← main output
+{stage_number}_{artifact_name}_summary.json   ← stage summary
+{stage_number}_{artifact_name}_errors.jsonl   ← processing errors
+```
+
+Example for stage 02:
+
+```
+02_discovered_links.jsonl
+02_discovered_links_summary.json
+02_discovered_links_errors.jsonl
+```
+
+**How paths are passed to stages:**
+
+The orchestrator creates a [`StagePaths`](../farmles_harvester/pipeline/stage_paths.py) for each stage via `StagePaths.for_stage(run_dir, stage_number, artifact_name)`. It then passes the previous stage's `output_path` as the next stage's `input_path` — see [`orchestrator/run_pipeline.py`](../farmles_harvester/orchestrator/run_pipeline.py):
+
+```python
+paths_02 = StagePaths.for_stage(run_dir, "02", "discovered_links")
+
+run_discover_links(
+    input_path=paths_01.output_path,   # 01_validated_sources.jsonl
+    stage_paths=paths_02,              # owns 02_discovered_links.*
+    ...
+)
+```
+
+Stages never construct their own paths or know about other stages. The orchestrator owns all wiring.
+
+---
 
 ## Implementation
 
@@ -73,7 +116,7 @@ If a stage fails then stop the run. Record failed StageResult in manifest.json a
 | Stage | Direction | When | Operation | Purpose |
 |---|---|---|---|---|
 | 01 — Validate URLs | WRITE | After stage | `upsert()` + `record_outcome(permanent)` | Record seed URLs that failed validation as permanent failures |
-| 02 — Discover Links | READ | During stage (fast mode only) | `get(url)` → `evaluate_url_strength()` | Skip crawling internal links already known as strong |
+| 02 — Discover Links | READ | During stage (fast mode only) | `get(url)` → `evaluate_url_strength()` | Skip crawling internal links already known as weak or permanently failed |
 | 03 — Score Candidate URLs | WRITE | After stage | `upsert_many()` + `record_source()` | Persist discovered URLs with candidate scores and source mappings |
 | 04 — Generate Markdown Pages | READ | During stage (fast mode only) | `get_many(urls)` → `evaluate_markdown_strength()` | Skip re-fetching candidates that already have sufficient markdown |
 | 04 — Generate Markdown Pages | WRITE | After stage | `record_outcome()` + `record_markdown_outcome()` | Record HTTP fetch results and markdown word counts/paths |
