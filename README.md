@@ -50,11 +50,12 @@ runs/2026-05-17_132400_initial-import/
   04_markdown_pages_errors.jsonl
 
   generated_wiki/
-    lead_1/
-      lead_metadata.json
-      index.md
-      vendors.md
-      visit.md
+    sources/
+      apexfarmersmarket-com/
+        source_metadata.json
+        index/index.md
+        vendors/index.md
+        visit/index.md
 ```
 
 ## Pipeline Stages

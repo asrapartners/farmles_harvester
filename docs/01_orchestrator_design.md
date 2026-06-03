@@ -81,6 +81,8 @@ Stages never construct their own paths or know about other stages. The orchestra
 
 ## Stage Artifacts — Summary and Errors
 
+See [`reference/pipeline_artifacts.md`](reference/pipeline_artifacts.md) for a complete reference of every file the pipeline writes, including schemas and a full run directory layout.
+
 Every stage produces three files. The main JSONL is the data artifact passed to the next stage. The other two are observability artifacts and are never read by downstream stages.
 
 **`{stage}_summary.json`** — a single JSON object written after the stage completes. Contains record counts broken down by outcome (e.g. `valid_count`, `broken_count`, `timeout_count`), start/end timestamps, and stage identity. The orchestrator folds this into `manifest.json` via `StageResult`. Use it to understand what happened in a run without reading thousands of JSONL lines.
@@ -115,7 +117,7 @@ The rule of thumb: if the stage knows what happened, it is an output record with
 - [`pipeline/stage_result.py`](../farmles_harvester/pipeline/stage_result.py) — `StageResult` dataclass
 
 **Registry ingestion** (non-fatal — warns but does not stop the pipeline):
-[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/pipeline/registry_integration.md`](pipeline/registry_integration.md) for details.
+[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/reference/registry_integration.md`](reference/registry_integration.md) for details.
 
 ---
 
