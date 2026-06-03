@@ -1,49 +1,53 @@
 # Pipeline Orchestrator Design
 
-## Purpose
+The orchestrator is the top-level controller for a farmles harvester run. It sequences two pipelines that execute in order: the static pipeline handles all pages reachable by plain HTTP; the dynamic pipeline follows up with pages that require browser-based rendering.
 
-The orchestrator is the top level controller for one 'farmles_harvester' run of a pipeline. It calls each stage
-of the pipeline in order with the input and "StagePaths" and records the result returned.
+```
+seed_urls.txt
+      │
+      ▼
+┌──────────────────────────────────────┐       ┌──────────────────────────┐
+│           Static Pipeline             │─write─►     url_registry.db      │
+│  00 → 01 → 02 → 03 → 04 → 05 → 06   │ after  │  (stages 01, 03, 04, 06) │
+└──────────────────────────────────────┘  each  └────────────┬─────────────┘
+                                          stage               │
+                                                  orchestrator queries
+                                                  dynamic_js candidates
+                                                              │
+                                                              ▼
+                                          ┌───────────────────────────────┐
+                                          │       Dynamic Pipeline         │
+                                          │  browser-fetch (crawl4ai)     │
+                                          │  → strip boilerplate          │
+                                          │  → update registry            │
+                                          └───────────────────────────────┘
+                                                              │
+                                                              ▼
+                                               generated_wiki/sources/<slug>/
+```
 
-It owns
+See [`overview.md`](overview.md) for the system-level view of both pipelines.
+
+---
+
+## Static Pipeline
+
+### Responsibilities
+
+The orchestrator owns:
 
 - CLI arguments
-- run folder creation if required.
-- creates the output folder with <timestamp>_<user_tag>
-- creates the `manifest.json` with run level metadata.
+- Run folder creation — creates the output folder with `<timestamp>_<user_tag>`
+- `manifest.json` — creates at start, records each `StageResult` as stages complete
+- `StagePaths` — creates the three artifact paths for each stage (output, summary, errors)
+- Registry lifecycle — opens one `UrlRegistry` at the start, closes it in a `finally` block
+- Stage sequencing — calls each stage in order, stops on failure
 
-For each stage the orchestrator creates StagePaths. This has 
-- absolute path to the output file
-- absolute path to the summary file
-- absolute path to the error file
+Each stage returns a `StageResult`. The orchestrator writes it into `manifest.json`. Stages never write directly to `manifest.json` and never construct their own paths.
 
-For example for stage 00:
+### File-Based Data Passing
 
-```
-StagePaths(
-    output_path=Path("/work/farmles_harvester/runs/2026-05-17_132400_initial-import/00_normalized_source_leads.jsonl"),
-    summary_path=Path("/work/farmles_harvester/runs/2026-05-17_132400_initial-import/00_normalized_source_leads_summary.json"),
-    errors_path=Path("/work/farmles_harvester/runs/2026-05-17_132400_initial-import/00_normalized_source_leads_errors.jsonl"),
-)
-```
-
-Each stage returns StageResult
-The orchestrator writes that result into manifest.json. 
-
-- Stages never write directly to `manifest.json`. 
-- use relative paths to the run directory inside `manifest.json`.
-{
-  "produced_artifacts": ["00_normalized_source_leads.jsonl"],
-  "summary_artifact": "00_normalized_source_leads_summary.json",
-  "error_artifact": "00_normalized_source_leads_errors.jsonl"
-}
-
-- If a stage fails then stop the run. 
-	- Record failed StageResult in manifest.json and leave the artifacts in the run dir.
-
-## File-Based Data Passing
-
-The pipeline is file-based. Every stage reads from a JSONL file produced by the previous stage and writes its own JSONL output to the run directory. There is no in-memory handoff between stages.
+Every stage reads from a JSONL file produced by the previous stage and writes its own JSONL output to the run directory. There is no in-memory handoff between stages.
 
 **File naming convention:**
 
@@ -53,17 +57,7 @@ The pipeline is file-based. Every stage reads from a JSONL file produced by the 
 {stage_number}_{artifact_name}_errors.jsonl   ← processing errors
 ```
 
-Example for stage 02:
-
-```
-02_discovered_links.jsonl
-02_discovered_links_summary.json
-02_discovered_links_errors.jsonl
-```
-
-**How paths are passed to stages:**
-
-The orchestrator creates a [`StagePaths`](../farmles_harvester/pipeline/stage_paths.py) for each stage via `StagePaths.for_stage(run_dir, stage_number, artifact_name)`. It then passes the previous stage's `output_path` as the next stage's `input_path` — see [`orchestrator/run_pipeline.py`](../farmles_harvester/orchestrator/run_pipeline.py):
+The orchestrator creates a [`StagePaths`](../farmles_harvester/pipeline/stage_paths.py) for each stage via `StagePaths.for_stage(run_dir, stage_number, artifact_name)` and passes the previous stage's `output_path` as the next stage's `input_path`:
 
 ```python
 paths_02 = StagePaths.for_stage(run_dir, "02", "discovered_links")
@@ -75,31 +69,21 @@ run_discover_links(
 )
 ```
 
-Stages never construct their own paths or know about other stages. The orchestrator owns all wiring.
+### Stage Artifacts — Summary and Errors
 
----
+See [`reference/pipeline_artifacts.md`](reference/pipeline_artifacts.md) for schemas and a full run directory layout.
 
-## Stage Artifacts — Summary and Errors
+**`{stage}_summary.json`** — record counts by outcome, timestamps, and stage identity. Folded into `manifest.json` via `StageResult`.
 
-See [`reference/pipeline_artifacts.md`](reference/pipeline_artifacts.md) for a complete reference of every file the pipeline writes, including schemas and a full run directory layout.
+**`{stage}_errors.jsonl`** — one record per input the stage could not handle at all (missing fields, unhandled exceptions). Routine failures (404, timeout, low score) appear in the main JSONL with a status field, not here.
 
-Every stage produces three files. The main JSONL is the data artifact passed to the next stage. The other two are observability artifacts and are never read by downstream stages.
-
-**`{stage}_summary.json`** — a single JSON object written after the stage completes. Contains record counts broken down by outcome (e.g. `valid_count`, `broken_count`, `timeout_count`), start/end timestamps, and stage identity. The orchestrator folds this into `manifest.json` via `StageResult`. Use it to understand what happened in a run without reading thousands of JSONL lines.
-
-**`{stage}_errors.jsonl`** — one record per input that caused an unexpected stage-level failure — meaning the stage could not produce a normal output record for it. This is not where routine failures go. A 404, a timeout, a low score, or a skipped record are all normal outcomes and appear in the main output JSONL with an appropriate status field. Errors are for things the stage could not classify or handle: missing required input fields, unhandled exceptions, parser crashes.
-
-The rule of thumb: if the stage knows what happened, it is an output record with a status. If the stage could not handle it at all, it is an error record.
-
----
-
-## Implementation
+### Implementation
 
 **Entry point:** [`cli.py`](../farmles_harvester/cli.py) — `main()` parses CLI args, builds config, and calls `run_pipeline()`
 
-**Orchestrator:** [`orchestrator/run_pipeline.py`](../farmles_harvester/orchestrator/run_pipeline.py) — `run_pipeline()` owns run-dir creation, stage sequencing, manifest updates, and registry lifecycle
+**Orchestrator:** [`orchestrator/run_pipeline.py`](../farmles_harvester/orchestrator/run_pipeline.py) — owns run-dir creation, stage sequencing, manifest updates, and registry lifecycle
 
-**Call sequence (stages):**
+**Call sequence:**
 
 | Stage | Source file | Entry function |
 |---|---|---|
@@ -117,11 +101,9 @@ The rule of thumb: if the stage knows what happened, it is an output record with
 - [`pipeline/stage_result.py`](../farmles_harvester/pipeline/stage_result.py) — `StageResult` dataclass
 
 **Registry ingestion** (non-fatal — warns but does not stop the pipeline):
-[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/url_registry/url_registry.md`](url_registry/url_registry.md) for details.
+[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`url_registry/url_registry.md`](url_registry/url_registry.md) for details.
 
----
-
-## UrlRegistry Integration
+### UrlRegistry Integration
 
 [`registry/url_registry.py`](../farmles_harvester/registry/url_registry.py) is a SQLite-backed persistent store for tracking URLs across runs. The orchestrator instantiates one `UrlRegistry` at the start of `run_pipeline()` and closes it at the end. The default path is `{run_dir}/url_registry.db`; callers can supply a shared path to reuse the registry across multiple runs (required for fast mode to take effect).
 
@@ -138,9 +120,7 @@ The rule of thumb: if the stage knows what happened, it is an output record with
 
 Fast-mode decision logic lives in [`registry/evaluation.py`](../farmles_harvester/registry/evaluation.py): `evaluate_url_strength()` (stage 02) and `evaluate_markdown_strength()` (stage 04).
 
----
-
-## High-Level Flow Diagram
+### Flow Diagram
 
 Solid arrows are **writes** (post-stage ingestion via `registry_ingest.py`). Dashed arrows are **reads** (fast-mode lookups during stage execution).
 
@@ -168,3 +148,26 @@ flowchart TD
     S04 -->|"WRITE · ingest_markdown_outcomes\nrecord_markdown_outcome"| REG
     S06 -->|"WRITE · ingest_source_relevance\nupsert_source_many"| REG
 ```
+
+---
+
+## Dynamic Pipeline
+
+### Responsibilities
+
+The orchestrator is responsible for creating the input context for the dynamic pipeline. After the static pipeline completes, it queries the registry for all pages the static pipeline could not fetch — pages flagged as `render_type = dynamic_js` with `markdown_status = not_attempted` — and passes that batch to `run_dynamic_pipeline()`.
+
+By the time the static pipeline finishes, the registry holds everything the dynamic pipeline needs: the URL, the `md_path` already assigned by stage 04, and the source slug. The orchestrator's job is to collect and hand it over — no path computation or discovery is needed.
+
+### Handoff
+
+```python
+run_pipeline(...)           # static pipeline completes
+
+dynamic_candidates = registry.query(
+    where="render_type = 'dynamic_js' AND markdown_status = 'not_attempted'"
+)
+run_dynamic_pipeline(candidates=dynamic_candidates, run_dir=run_dir, registry=registry)
+```
+
+The dynamic pipeline receives a fully resolved batch and is responsible for browser-fetching, boilerplate stripping, and updating the registry. See [`dynamic_pipeline/overview.md`](dynamic_pipeline/overview.md) for the full design.
