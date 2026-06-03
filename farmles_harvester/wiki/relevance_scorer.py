@@ -35,10 +35,9 @@ def score_md_text(text: str) -> dict:
     """
     body = _strip_md_frame(text)
     words = re.findall(r"[a-z]+", body.lower())
-    word_set = set(words)
 
     keyword_hits = sum(1 for w in words if w in _MARKET_KEYWORDS)
-    negative_hits = sum(1 for w in word_set if w in _NON_MARKET_SIGNALS)
+    negative_hits = sum(1 for w in words if w in _NON_MARKET_SIGNALS)
 
     return {
         "keyword_hits": keyword_hits,
