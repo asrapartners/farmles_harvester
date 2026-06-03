@@ -117,7 +117,7 @@ The rule of thumb: if the stage knows what happened, it is an output record with
 - [`pipeline/stage_result.py`](../farmles_harvester/pipeline/stage_result.py) — `StageResult` dataclass
 
 **Registry ingestion** (non-fatal — warns but does not stop the pipeline):
-[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/reference/registry_integration.md`](reference/registry_integration.md) for details.
+[`orchestrator/registry_ingest.py`](../farmles_harvester/orchestrator/registry_ingest.py) — called after stages 01, 03, 04, 06. See [`docs/reference/url_registry.md`](reference/url_registry.md) for details.
 
 ---
 

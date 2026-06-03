@@ -1,6 +1,7 @@
 from farmles_harvester.registry.evaluation import (
     evaluate_markdown_strength,
     evaluate_url_strength,
+    should_process_url,
 )
 
 
@@ -65,3 +66,37 @@ class TestEvaluateMarkdownStrength:
     def test_permanent_failure_skipped(self):
         row = _url_row(markdown_word_count=500, last_outcome_class="http_4xx", retry_posture="permanent")
         assert evaluate_markdown_strength(row).should_process is False
+
+
+def _source_row(**overrides) -> dict:
+    base = {"relevance_label": "confirmed"}
+    base.update(overrides)
+    return base
+
+
+class TestShouldProcessUrl:
+    def test_both_new_processes(self):
+        assert should_process_url(None, None).should_process is True
+
+    def test_url_permanent_failure_blocks_regardless_of_source(self):
+        url = _url_row(candidate_strength="strong", last_outcome_class="http_4xx", retry_posture="permanent")
+        assert should_process_url(url, _source_row(relevance_label="confirmed")).should_process is False
+
+    def test_url_weak_blocks_regardless_of_source(self):
+        assert should_process_url(_url_row(candidate_strength="weak"), _source_row()).should_process is False
+
+    def test_low_confidence_source_blocks(self):
+        url = _url_row(candidate_strength="strong")
+        assert should_process_url(url, _source_row(relevance_label="low_confidence")).should_process is False
+
+    def test_confirmed_source_passes(self):
+        assert should_process_url(_url_row(candidate_strength="strong"), _source_row(relevance_label="confirmed")).should_process is True
+
+    def test_likely_source_passes(self):
+        assert should_process_url(_url_row(candidate_strength="strong"), _source_row(relevance_label="likely")).should_process is True
+
+    def test_uncertain_source_passes(self):
+        assert should_process_url(_url_row(candidate_strength="strong"), _source_row(relevance_label="uncertain")).should_process is True
+
+    def test_unscored_source_none_passes(self):
+        assert should_process_url(_url_row(candidate_strength="strong"), None).should_process is True

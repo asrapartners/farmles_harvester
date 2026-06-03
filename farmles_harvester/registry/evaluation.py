@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from farmles_harvester.constants import CandidateStrength
+from farmles_harvester.constants import CandidateStrength, SourceRelevanceLabel
 
 _STRENGTH_RANK = {
     CandidateStrength.WEAK: 0,
@@ -34,6 +34,27 @@ def evaluate_url_strength(
     if rank >= threshold:
         return EvalVerdict(True, [f"strength {row.get('candidate_strength')} >= {min_strength}"])
     return EvalVerdict(False, [f"strength {row.get('candidate_strength')} < {min_strength}"])
+
+
+def should_process_url(
+    url_row: dict | None,
+    source_row: dict | None,
+    *,
+    min_strength: str = CandidateStrength.STRONG,
+    skip_permanent_failures: bool = True,
+) -> EvalVerdict:
+    url_verdict = evaluate_url_strength(
+        url_row,
+        min_strength=min_strength,
+        skip_permanent_failures=skip_permanent_failures,
+    )
+    if not url_verdict.should_process:
+        return url_verdict
+
+    if source_row is not None and source_row.get("relevance_label") == SourceRelevanceLabel.LOW_CONFIDENCE:
+        return EvalVerdict(False, ["source relevance: low_confidence"])
+
+    return EvalVerdict(True, url_verdict.reasons + ["source eligible"])
 
 
 def rate_markdown_strength(
