@@ -34,7 +34,7 @@ Each input record represents one scored candidate URL from stage 03.
 | `candidate_status` | yes | Only `selected` records are processed |
 | `candidate_type` | yes | Drives filename selection via `candidate_type_to_filename()` |
 | `candidate_score` | yes | Preserved in output record |
-| `source_lead_id` | yes | Determines the lead folder under `generated_wiki/` |
+| `source_slug` | yes | Derived from `source_url`; names the wiki folder under `generated_wiki/sources/` |
 | `source_url` | yes | Preserved in output; used for slug derivation |
 | `run_id` | yes | Validated; re-injected from harness `run_id` arg |
 | `link_text` | no | Passed through if present |
@@ -47,7 +47,7 @@ Each input record represents one scored candidate URL from stage 03.
 For each selected candidate record ([`stages/generate_markdown_pages.py`](../../farmles_harvester/stages/generate_markdown_pages.py) → `run_generate_markdown_pages()`):
 
 1. Filter to `candidate_status = selected`; skip and count rejected records.
-2. Derive the lead folder via `source_url_to_slug()` ([`web/url_utils.py`](../../farmles_harvester/web/url_utils.py)).
+2. Derive the source folder name via `source_url_to_slug()` ([`web/url_utils.py`](../../farmles_harvester/web/url_utils.py)).
 3. Assign a unique markdown filename via `candidate_type_to_filename()` and `ensure_unique_filename()` — local pure functions (`vendor_page` → `vendors.md`, `hours_location_page` → `visit.md`, etc.; see [Filename Rules](#filename-rules)).
 4. Fetch the candidate page via `fetcher.fetch(candidate_url)` ([`web/fetcher.py`](../../farmles_harvester/web/fetcher.py)).
 5. Detect render type via `detect_render_type()` ([`web/render_type_detector.py`](../../farmles_harvester/web/render_type_detector.py)) on the raw HTML — `static_html`, `dynamic_js`, or `unknown`. A weak markdown output combined with `dynamic_js` signals the page requires JavaScript to render its content.
@@ -55,8 +55,8 @@ For each selected candidate record ([`stages/generate_markdown_pages.py`](../../
 7. Convert to markdown via `html_to_markdown()` — local helper.
 8. Hash the markdown via `compute_content_hash()` — local helper.
 9. Rate the markdown quality via `evaluate_markdown_strength()` ([`registry/evaluation.py`](../../farmles_harvester/registry/evaluation.py)) — assigns a strength signal used by the registry to decide whether re-fetching is worthwhile on future runs.
-10. Write the markdown file under `generated_wiki/<source_lead_id>/`, e.g. `generated_wiki/lead_1/vendors.md`.
-11. Write `lead_metadata.json` once per lead folder after all pages for that lead are written.
+10. Write the markdown file under `generated_wiki/sources/<source_slug>/`, e.g. `generated_wiki/sources/apexfarmersmarket-com/vendors/index.md`.
+11. Write `source_metadata.json` once per source folder after all pages for that source are written.
 12. Append one record to `04_markdown_pages.jsonl` via `JsonlWriter` ([`pipeline/jsonl.py`](../../farmles_harvester/pipeline/jsonl.py)).
 
 ---
@@ -71,13 +71,13 @@ Rejected and external records are skipped and counted in the summary but do not 
 
 ## Output Data Model
 
-Each generated lead folder must contain `lead_metadata.json`.
+Each generated source folder must contain `source_metadata.json`.
 
-### Example lead_metadata.json
+### Example source_metadata.json
 
 ```json
 {
-  "source_lead_id": "lead_1",
+  "source_slug": "apexfarmersmarket-com",
   "input_url": "https://www.apexfarmersmarket.com/",
   "normalized_url": "https://www.apexfarmersmarket.com/",
   "final_url": "https://www.apexfarmersmarket.com/",
@@ -92,7 +92,7 @@ Each line in `04_markdown_pages.jsonl` is one JSON object.
 | Field | Required | Description |
 |---|---|---|
 | `run_id` | yes | Run identifier, injected by the harness |
-| `source_lead_id` | yes | Identity of the seed lead; preserved from input |
+| `source_slug` | yes | Identity of the seed lead; preserved from input |
 | `source_url` | yes | Seed URL; preserved from input |
 | `candidate_url` | yes | The fetched URL |
 | `candidate_type` | yes | Signal family from stage 03 |
@@ -101,7 +101,7 @@ Each line in `04_markdown_pages.jsonl` is one JSON object.
 | `http_status` | no | HTTP response code; absent on fetch failure |
 | `content_type` | no | MIME type from response headers |
 | `render_type` | no | `static_html`, `dynamic_js`, or `unknown`; detected from raw HTML before cleaning. `dynamic_js` with `markdown_strength = weak` indicates a JS-rendered page |
-| `markdown_path` | no | Relative path to the written markdown file, e.g. `generated_wiki/lead_1/vendors.md`; absent on failure |
+| `markdown_path` | no | Relative path to the written markdown file, e.g. `generated_wiki/sources/apexfarmersmarket-com/vendors/index.md`; absent on failure |
 | `markdown_filename` | no | Filename only, e.g. `vendors.md`; absent on failure |
 | `markdown_strength` | no | Quality rating of the converted markdown: `strong`, `medium`, or `weak`; absent on failure |
 | `content_hash` | no | `sha256:<hex>`; absent on failure |
@@ -112,14 +112,14 @@ Example:
 ```json
 {
   "run_id": "2026-05-17_132400_initial-import",
-  "source_lead_id": "lead_1",
+  "source_slug": "apexfarmersmarket-com",
   "candidate_url": "https://www.apexfarmersmarket.com/vendors",
   "candidate_type": "vendor_page",
   "candidate_score": 80,
   "fetch_status": "fetched",
   "http_status": 200,
   "content_type": "text/html",
-  "markdown_path": "generated_wiki/lead_1/vendors.md",
+  "markdown_path": "generated_wiki/sources/apexfarmersmarket-com/vendors/index.md",
   "markdown_filename": "vendors.md",
   "render_type": "static_html",
   "markdown_strength": "strong",
@@ -137,7 +137,7 @@ Write one record per selected candidate to `04_markdown_pages.jsonl`, including 
 
 Fetch failures set `fetch_status = fetch_failed` and do not include `markdown_path`, `markdown_filename`, or `content_hash`. They do not crash the stage.
 
-`lead_metadata.json` is written once per lead folder after all candidates for that lead are processed.
+`source_metadata.json` is written once per source folder after all candidates for that lead are processed.
 
 Records with `candidate_status != selected` are skipped. They appear in the summary counts but not in the output JSONL.
 
@@ -151,7 +151,7 @@ Records with `candidate_status != selected` are skipped. They appear in the summ
 |---|---|
 | `run_id` | Run identifier |
 | `stage_name` | Always `generate_markdown_pages` |
-| `source_lead_id` | From the input record, if present |
+| `source_slug` | From the input record, if present |
 | `candidate_url` | From the input record, if present |
 | `error_type` | e.g. `fetch_error`, `invalid_input_record`, `write_error` |
 | `message` | Human-readable description of the failure |
@@ -175,7 +175,7 @@ Records with `candidate_status != selected` are skipped. They appear in the summ
 | `fetched_count` | Pages successfully fetched and converted |
 | `fetch_failed_count` | Pages that failed to fetch |
 | `error_records` | Records that failed processing for other reasons |
-| `leads_written` | Number of distinct lead folders written |
+| `source_folders_created` | Number of distinct source folders written |
 | `started_at` | ISO-8601 timestamp |
 | `completed_at` | ISO-8601 timestamp |
 
@@ -218,9 +218,9 @@ vendors_3.md
 
 `compute_content_hash(markdown_text) -> str`
 
-`build_markdown_path(source_lead_id, filename) -> Path`
+`build_markdown_path(source_slug, filename) -> Path`
 
-`build_lead_metadata(records_for_lead) -> dict`
+`build_source_metadata(source_slug, records_for_source) -> dict`
 
 ---
 
@@ -233,16 +233,17 @@ runs/2026-05-17_132400_initial-import/
   04_markdown_pages_errors.jsonl
 
   generated_wiki/
-    lead_1/
-      lead_metadata.json
-      index.md
-      vendors.md
-      visit.md
+    sources/
+      apexfarmersmarket-com/
+        source_metadata.json
+        index/index.md
+        vendors/index.md
+        visit/index.md
 
-    lead_2/
-      lead_metadata.json
-      index.md
-      vendors.md
+      localharvest-org/
+        source_metadata.json
+        index/index.md
+        vendors/index.md
 ```
 
 ---
@@ -296,8 +297,8 @@ Recommended config values:
 - Reading input leads from `03_candidate_urls.jsonl`
 - Only `candidate_status = selected` records are processed
 - Rejected candidates are skipped and counted
-- Markdown files are written under `generated_wiki/<source_lead_id>/`
-- `lead_metadata.json` is written once per lead folder
+- Markdown files are written under `generated_wiki/sources/<source_slug>/`
+- `source_metadata.json` is written once per source folder
 - Fetch failures are recorded as errors and do not crash the stage
 
 ---
@@ -310,8 +311,8 @@ This stage is complete when:
 2. Only `candidate_status = selected` records are fetched.
 3. Rejected candidates are skipped and counted.
 4. Each fetched page is cleaned and converted to markdown.
-5. Markdown files are written under `generated_wiki/<source_lead_id>/`.
-6. `lead_metadata.json` is written once per lead folder.
+5. Markdown files are written under `generated_wiki/sources/<source_slug>/`.
+6. `source_metadata.json` is written once per source folder.
 7. The stage writes `04_markdown_pages.jsonl`.
 8. Fetch failures are recorded as errors and do not crash the stage.
 9. Unit tests cover `candidate_type_to_filename()`, filename collision handling, and `html_to_markdown()`.

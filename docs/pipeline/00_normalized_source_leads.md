@@ -14,7 +14,7 @@ User provides a list of URLs.
 ## Output Data Model
 For each valid source lead, one record is written to the output JSONL.
 
-- `source_lead_id` — incrementing counter (e.g. `lead_1`); not a market_id
+- `source_slug` — URL-derived identifier (e.g. `apexfarmersmarket-com`); stable across runs
 - `input_url` — what the user typed
 - `normalized_url` — what the next stage should use
 - `input_line` — line number in input, for traceability
@@ -25,7 +25,7 @@ Duplicate normalized URLs are discarded from output; the count is recorded in th
 ```json
 {
   "run_id": "2026-05-17_132400_initial-import",
-  "source_lead_id": "lead_1",
+  "source_slug": "apexfarmersmarket-com",
   "input_url": "apexfarmersmarket.com",
   "normalized_url": "https://apexfarmersmarket.com/",
   "input_line": 3,

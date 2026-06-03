@@ -20,7 +20,7 @@ Fields read from each input record ([`stages/discover_links.py`](../../farmles_h
 | Field | Required | How this stage uses it |
 |---|---|---|
 | `final_url` | yes | URL to fetch and seed the BFS queue |
-| `source_lead_id` | yes | Tags all output records; key for per-source BFS cap tracking |
+| `source_slug` | yes | Tags all output records; key for per-source BFS cap tracking |
 | `validation_status` | yes | Filtered — only `valid` or `redirected` records are processed |
 | `normalized_url` | yes | Validated; passed through to output records |
 | `content_type` | no | Filtered — must start with `text/html` or `application/xhtml+xml`; absent = skipped |
@@ -65,6 +65,8 @@ Before queuing any internal link, stage 02 calls `score_discovered_link()` on it
 
 ### Layer 2 — prior-run strength (fast mode only)
 
+See [`reference/fast_mode.md`](../reference/fast_mode.md) for the full fast-mode decision model across all stages.
+
 `fast_mode = true` adds a second gate using the registry. After each run, stage 03 writes `candidate_strength` into `urls.candidate_strength`. On the next run, stage 02 reads that value via `registry.get(discovered_url)` and skips links already known to be weak:
 
 | `urls.candidate_strength` | result |
@@ -88,7 +90,7 @@ Each line in `02_discovered_links.jsonl` is one JSON object.
 | Field | Required | Description |
 |---|---|---|
 | `run_id` | yes | Run identifier, injected by the harness |
-| `source_lead_id` | yes | Identity of the seed lead; preserved from input |
+| `source_slug` | yes | Identity of the seed lead; preserved from input |
 | `source_url` | yes | Original seed URL (not the BFS fetch URL) |
 | `raw_href` | yes | Unresolved href value from the `<a>` tag |
 | `discovered_url` | yes | Resolved and normalized absolute URL |
@@ -109,7 +111,7 @@ Each line in `02_discovered_links.jsonl` is one JSON object.
 
 `02_discovered_links_errors.jsonl` — for unexpected processing failures (not filtered hrefs).
 
-Required fields: `run_id`, `stage_name`, `source_lead_id`, `source_url`, `error_type`, `message`, `retryable`, `created_at`
+Required fields: `run_id`, `stage_name`, `source_slug`, `source_url`, `error_type`, `message`, `retryable`, `created_at`
 
 Network failures fetching a source page produce an error record. Filtered hrefs (`mailto:`, `tel:`, empty, fragment) are counted in the summary, not written as errors.
 

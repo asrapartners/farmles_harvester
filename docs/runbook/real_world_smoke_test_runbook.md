@@ -103,7 +103,7 @@ Confirm:
 
 - one input URL produced one source lead
 - `normalized_url` looks correct
-- `source_lead_id` exists
+- `source_slug` exists and matches the seed URL domain
 
 ---
 

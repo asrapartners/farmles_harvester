@@ -36,7 +36,7 @@ Example input record:
 
 ```json
 {
-  "source_lead_id": "lead_000001",
+  "source_slug": "apexfarmersmarket-com",
   "input_url": "apexfarmersmarket.com",
   "normalized_url": "https://apexfarmersmarket.com/",
   "status": "normalized",
@@ -163,7 +163,7 @@ Required fields:
 
 ```text
 run_id
-source_lead_id
+source_slug
 input_url
 normalized_url
 final_url
@@ -188,7 +188,7 @@ Example successful record:
 ```json
 {
   "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
+  "source_slug": "apexfarmersmarket-com",
   "input_url": "apexfarmersmarket.com",
   "normalized_url": "https://apexfarmersmarket.com/",
   "final_url": "https://www.apexfarmersmarket.com/",
@@ -211,7 +211,7 @@ Example broken record:
 ```json
 {
   "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000002",
+  "source_slug": "badsite-example",
   "input_url": "badsite.example",
   "normalized_url": "https://badsite.example/",
   "final_url": null,
@@ -237,7 +237,7 @@ Each error record must include:
 ```text
 run_id
 stage_name
-source_lead_id
+source_slug
 normalized_url
 error_type
 message
@@ -251,7 +251,7 @@ Example:
 {
   "run_id": "2026-05-16_113045_full-recrawl",
   "stage_name": "validate_urls",
-  "source_lead_id": "lead_000017",
+  "source_slug": "example-com",
   "normalized_url": "https://example.com/",
   "error_type": "unexpected_exception",
   "message": "Unexpected parser failure",
@@ -443,7 +443,7 @@ Recommended config values:
 
 ## Implementation Rules
 
-1. Preserve `source_lead_id`, `input_url`, and `normalized_url` from input.
+1. Preserve `source_slug`, `input_url`, and `normalized_url` from input record.
 2. Write exactly one output record per input record whenever possible.
 3. Do not drop failed URLs silently.
 4. Do not treat redirects as errors.
@@ -595,7 +595,7 @@ Expected:
 ```text
 01_validated_sources.jsonl exists
 it contains 3 JSONL lines
-each line contains source_lead_id
+each line contains source_slug
 each line contains normalized_url
 each line contains validation_status
 ```
@@ -608,7 +608,7 @@ Given:
 
 ```json
 {
-  "source_lead_id": "lead_000001",
+  "source_slug": "apexfarmersmarket-com",
   "input_url": "example.com",
   "normalized_url": "https://example.com/"
 }
@@ -617,7 +617,7 @@ Given:
 Expected output record includes the same:
 
 ```text
-source_lead_id
+source_slug
 input_url
 normalized_url
 ```
@@ -671,7 +671,7 @@ Expected:
 
 ```text
 01_validated_sources_errors.jsonl exists
-error record includes source_lead_id
+error record includes source_slug
 error record includes error_type
 error record includes retryable
 ```

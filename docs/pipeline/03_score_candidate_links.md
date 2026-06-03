@@ -32,7 +32,7 @@ Each input record represents one link discovered on a validated source page.
 | `discovered_url` | yes | Scored — path segments and query keys are tokenized for signal matching |
 | `link_text` | yes | Scored — text tokens feed the same signal matching as the URL |
 | `is_internal` | yes | Scored — external links short-circuit immediately to `external_reference` |
-| `source_lead_id` | yes | Preserved in output; used for deduplication key |
+| `source_slug` | yes | Preserved in output; used for deduplication key |
 | `source_url` | yes | Preserved in output |
 | `run_id` | yes | Validated; output record re-injects it from the harness `run_id` arg |
 | `follow_allowed` | yes | Validated (in `DISCOVERED_LINK_REQUIRED`) but not used in scoring logic |
@@ -46,7 +46,7 @@ Each input record represents one link discovered on a validated source page.
 
 For each discovered link record ([`stages/score_candidate_urls.py`](../../farmles_harvester/stages/score_candidate_urls.py) → `run_score_candidate_urls()`):
 
-1. Read `discovered_url`, `link_text`, and `is_internal` for scoring; `source_lead_id` and `source_url` for output.
+1. Read `discovered_url`, `link_text`, and `is_internal` for scoring; `source_slug` and `source_url` for output.
 2. Apply deterministic scoring rules — `score_discovered_link(LinkRecord, config) -> CandidateScore`.
 3. Assign a `candidate_score` — integer 0–100, clamped.
 4. Assign a `candidate_type` — strongest matched signal family (`CandidateType` in [`constants.py`](../../farmles_harvester/constants.py)).
@@ -143,7 +143,7 @@ Later, if storage volume becomes a problem, rejected records may be moved to a s
 Deduplicate candidate records by:
 
 ```text
-source_lead_id + discovered_url
+source_slug + candidate_url
 ```
 
 If duplicate records are present in input, keep the highest scoring result.
@@ -159,7 +159,7 @@ Each line in `03_candidate_urls.jsonl` is one JSON object.
 | Field | Required | Description |
 |---|---|---|
 | `run_id` | yes | Run identifier, injected by the harness |
-| `source_lead_id` | yes | Identity of the seed lead; preserved from input |
+| `source_slug` | yes | Identity of the seed lead; preserved from input |
 | `source_url` | yes | Seed URL that was crawled; preserved from input |
 | `candidate_url` | yes | The scored URL (renamed from `discovered_url`) |
 | `link_text` | yes | Anchor text of the link; preserved from input |
@@ -178,7 +178,7 @@ Example:
 ```json
 {
   "run_id": "2026-05-16_113045_full-recrawl",
-  "source_lead_id": "lead_000001",
+  "source_slug": "apexfarmersmarket-com",
   "source_url": "https://www.apexfarmersmarket.com/",
   "candidate_url": "https://www.apexfarmersmarket.com/vendors",
   "link_text": "Vendors",
@@ -202,7 +202,7 @@ Example:
 |---|---|
 | `run_id` | Run identifier |
 | `stage_name` | Always `score_candidate_urls` |
-| `source_lead_id` | From the input record, if present |
+| `source_slug` | From the input record, if present |
 | `discovered_url` | From the input record, if present |
 | `error_type` | e.g. `invalid_input_record` |
 | `message` | Human-readable description of the failure |
