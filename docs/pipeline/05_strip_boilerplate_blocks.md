@@ -180,13 +180,13 @@ Recommended config values:
 
 `boilerplate_threshold`: fraction of a source's files a block must appear in to be considered boilerplate (0.0–1.0). Lower values remove more aggressively.
 
-`min_files_for_fingerprint`: minimum number of fetched pages a source must have before fingerprinting is attempted. Sources below this threshold are passed through unchanged.
+`min_files_for_fingerprint`: minimum number of fetched pages a source must have before fingerprinting is attempted. Sources below this threshold are still evaluated and produce output records, but with `blocks_removed = 0` and `modified = false` — there are not enough pages to build a reliable cross-page fingerprint.
 
 ---
 
 ## Registry Integration
 
-This stage does not write to the registry directly. The updated `content_hash` values in `05_stripped_pages.jsonl` are used by stage 06 to read the post-stripped markdown from disk.
+This stage does not write to the registry directly. Stage 06 reads the post-stripped markdown from disk using `markdown_path` from `05_stripped_pages.jsonl`.
 
 ---
 
