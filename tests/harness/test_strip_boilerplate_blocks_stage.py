@@ -25,8 +25,7 @@ def _make_md_record(tmp_path: Path, slug: str, rel: str, content: str) -> dict:
         "fetch_status": "fetched",
         "markdown_path": f"generated_wiki/sources/{slug}/{rel}",
         "markdown_filename": Path(rel).name,
-        "content_hash": "sha256:abc",
-        "generated_at": "2026-01-01T00:00:00Z",
+"generated_at": "2026-01-01T00:00:00Z",
     }
 
 
@@ -51,7 +50,6 @@ def _three_vendor_input(tmp_path: Path) -> tuple[Path, StagePaths]:
         "fetch_status": "fetch_error",
         "markdown_path": None,
         "markdown_filename": None,
-        "content_hash": None,
         "generated_at": "2026-01-01T00:00:00Z",
     })
     input_path = tmp_path / "04_markdown_pages.jsonl"

@@ -26,7 +26,7 @@ VENDOR_HTML = """\
 </body></html>
 """
 
-_FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "timestamp", "content_hash"}
+_FORBIDDEN_META_KEYS = {"generated_at", "run_id", "harvester_run_id", "timestamp"}
 
 
 INPUT_URL = "apex.example"

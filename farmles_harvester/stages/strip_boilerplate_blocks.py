@@ -1,4 +1,3 @@
-import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,16 +58,11 @@ def run_strip_boilerplate_blocks(
                     files_modified += 1
                     total_blocks_removed += blocks_removed
 
-                content_hash = "sha256:" + hashlib.sha256(
-                    (cleaned if modified else original).encode()
-                ).hexdigest()
-
                 out.write({
                     "run_id": run_id,
                     "source_slug": slug,
                     "markdown_path": record["markdown_path"],
                     "blocks_removed": blocks_removed,
-                    "content_hash": content_hash,
                     "modified": modified,
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                 })

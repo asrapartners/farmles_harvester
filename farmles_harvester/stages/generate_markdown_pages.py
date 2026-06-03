@@ -1,4 +1,3 @@
-import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -55,10 +54,6 @@ def html_to_markdown(html: str, source_url: str) -> str:
 
     return f"{markdown}\n\n---\n\nSource: {source_url}\n"
 
-
-def compute_content_hash(markdown_text: str) -> str:
-    digest = hashlib.sha256(markdown_text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
 
 
 def _is_html(content_type: str | None) -> bool:
@@ -205,7 +200,6 @@ def run_generate_markdown_pages(
                     "content_type": None,
                     "markdown_path": None,
                     "markdown_filename": None,
-                    "content_hash": None,
                     "generated_at": generated_at,
                 })
                 output_count += 1
@@ -237,7 +231,6 @@ def run_generate_markdown_pages(
                     "content_type": response.content_type,
                     "markdown_path": None,
                     "markdown_filename": None,
-                    "content_hash": None,
                     "generated_at": generated_at,
                 })
                 output_count += 1
@@ -275,7 +268,6 @@ def run_generate_markdown_pages(
                 "render_type": render_type,
                 "markdown_strength": rate_markdown_strength(word_count, strong_min=md_strong_min, medium_min=md_medium_min),
                 "markdown_word_count": word_count,
-                "content_hash": compute_content_hash(markdown_text),
                 "content_retention_ratio": round(content_retention, 4),
                 "generated_at": generated_at,
             })

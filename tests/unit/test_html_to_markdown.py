@@ -1,7 +1,6 @@
 import pytest
 
 from farmles_harvester.stages.generate_markdown_pages import (
-    compute_content_hash,
     html_to_markdown,
     normalize_markdown,
 )
@@ -76,18 +75,6 @@ class TestNormalizeMarkdown:
         assert normalize_markdown("") == ""
         assert normalize_markdown("   \n\n   ") == ""
 
-
-class TestComputeContentHash:
-    def test_returns_sha256_prefixed_string(self):
-        result = compute_content_hash("hello")
-        assert result.startswith("sha256:")
-        assert len(result) == len("sha256:") + 64
-
-    def test_is_deterministic(self):
-        assert compute_content_hash("hello") == compute_content_hash("hello")
-
-    def test_differs_for_different_inputs(self):
-        assert compute_content_hash("hello") != compute_content_hash("world")
 
 
 class TestStability:
