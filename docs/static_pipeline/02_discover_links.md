@@ -65,7 +65,7 @@ Before queuing any internal link, stage 02 calls `score_discovered_link()` on it
 
 ### Layer 2 — prior-run strength (fast mode only)
 
-See [`reference/fast_mode.md`](../reference/fast_mode.md) for the full fast-mode decision model across all stages.
+See [`url_registry/fast_mode.md`](../url_registry/fast_mode.md) for the full fast-mode decision model across all stages.
 
 `fast_mode = true` adds a second gate using the registry. After each run, stage 03 writes `candidate_strength` into `urls.candidate_strength`. On the next run, stage 02 reads that value via `registry.get(discovered_url)` and skips links already known to be weak:
 

@@ -82,6 +82,27 @@ A URL with no registry entry (`row is None`) bypasses all confidence checks and 
 
 ---
 
+## Staleness and how to reset
+
+Registry state is persistent but not self-correcting. Two classes of stale entries can cause URLs to be skipped indefinitely:
+
+**URL-level staleness** — a URL that was weak or permanently failed in a prior run keeps those classifications forever. A site that was unreachable during run 1 gets `retry_posture = permanent` and is never retried, even if it recovers.
+
+**Source-level staleness** — a source domain scored `low_confidence` by stage 06 blocks every URL from that domain on all future runs. A thin first crawl (too few pages, boilerplate-heavy content) can permanently misclassify a genuine farmers market.
+
+**The fix: run with `fast_mode: false`**
+
+Disabling fast mode bypasses all registry reads in both stages. Every URL is re-crawled and re-fetched from scratch regardless of stored `candidate_strength`, `retry_posture`, or source `relevance_label`. The registry is still written to at the end of each stage, so a clean run rebuilds the state from current observations.
+
+```
+fast_mode: false   →  no registry reads  →  full re-crawl
+fast_mode: true    →  registry reads active  →  skips apply
+```
+
+Run with fast mode off periodically, or whenever you suspect the registry has drifted from reality.
+
+---
+
 ## Example
 
 Run 1 (no registry / fast_mode off):
