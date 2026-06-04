@@ -18,6 +18,8 @@ It does **not** rewrite or summarize content.
 It does **not** remove blocks that are unique to a page.  
 It does **not** run if a source has fewer than `min_files_for_fingerprint` markdown files.
 
+> **Limitation — single-URL and small-batch runs:** This stage produces no stripping when a source has fewer than `min_files_for_fingerprint` files (default: 3). With only one or two pages fetched, the fingerprint cannot be built and all files pass through with `blocks_removed = 0`, `modified = false`. Callers that use stage 05 output to infer content quality (e.g. detecting JS-rendered pages) must account for this: the output markdown will still contain nav/footer boilerplate, inflating apparent word count.
+
 ---
 
 ## Consumed Artifact

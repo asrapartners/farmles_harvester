@@ -32,3 +32,6 @@ include = ["farmles_harvester*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests that hit real URLs — run with pytest -m integration",
+]

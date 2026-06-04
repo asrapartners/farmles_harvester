@@ -110,6 +110,33 @@ Each run has a manifest.json that holds the run ledger.
 
 ---
 
+## Developer Utilities
+
+Installed commands (available after `pip install -e ".[dev]"`):
+
+| Command | Purpose | Example |
+|---|---|---|
+| `detect_render <url>` | Detect whether a URL serves static HTML or a JS-rendered SPA (heuristic only, no pipeline stages) | `detect_render https://apexfarmersmarket.com --verbose` |
+| `report_crawl` | Print a debugging report for a harvester run | `report_crawl --run runs/2026-05-17_132400_initial-import` |
+| `scan_relevance <folder>` | Scan markdown files and report source relevance to farmer's markets | `scan_relevance generated_wiki/sources/` |
+
+### Integration tests
+
+`tests/integration/` contains tests that hit real URLs to verify pipeline stages end-to-end. They are excluded from the normal test run and must be triggered explicitly:
+
+```bash
+pytest -m integration
+```
+
+Each integration test file also works as a standalone debug utility:
+
+```bash
+python tests/integration/test_dynamic_detection.py https://apexfarmersmarket.com
+python tests/integration/test_dynamic_detection.py https://some-spa.com --json
+```
+
+---
+
 ## Quick Start (Sprint 0 — Tooling)
 
 Sprint 0 verifies that the core HTML tooling (BeautifulSoup, markdownify) and test infrastructure work locally. No pipeline logic is implemented yet.
