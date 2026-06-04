@@ -137,16 +137,70 @@ python tests/integration/test_dynamic_detection.py https://some-spa.com --json
 
 ---
 
-## Quick Start (Sprint 0 — Tooling)
+## Setup
 
-Sprint 0 verifies that the core HTML tooling (BeautifulSoup, markdownify) and test infrastructure work locally. No pipeline logic is implemented yet.
+### 1. Create and activate a virtual environment
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-pytest
 ```
 
-All tests run offline. No internet access is required.
+### 2. Install dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+### 3. Install browser binaries for dynamic page crawling
+
+```bash
+crawl4ai-setup
+```
+
+> **Do you need to run this every time you clone?**  
+> No. `crawl4ai-setup` installs Playwright browser binaries to a system-level path (`~/.cache/ms-playwright` on Linux/Mac). They persist across clones and only need to be re-run once per machine, or after upgrading `crawl4ai` to a version that requires a newer browser build. If you are unsure, run `crawl4ai-doctor` — it will tell you whether the setup is complete.
+
+### 4. Verify
+
+```bash
+crawl4ai-doctor   # check browser setup
+pytest            # all tests run offline, no network required
+```
+
+---
+
+## Running the harvester
+
+Create a plain-text file with one URL per line:
+
+```
+# seed_urls.txt
+https://apexfarmersmarket.com
+https://greenfieldfarmersmarket.org
+```
+
+Then run:
+
+```bash
+farmles_harvester --seed-file seed_urls.txt --tag initial-import
+```
+
+Output is written to `runs/{timestamp}_{tag}/`. For example:
+
+```
+runs/2026-05-17_132400_initial-import/
+```
+
+#### Common options
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--tag TAG` | *(required)* | Label for this run, used in the folder name |
+| `--runs-dir DIR` | `runs/` | Where to create the run folder |
+| `--fast` | off | Skip URLs/pages that already have strong cached results |
+| `--max-depth N` | 10 | Maximum link-discovery depth per source |
+| `--registry-db PATH` | `{run_dir}/url_registry.db` | Reuse a registry from a previous run |
+
+Full option reference: `farmles_harvester --help`
 
