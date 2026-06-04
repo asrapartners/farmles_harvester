@@ -35,8 +35,8 @@ from farmles_harvester.web.fetcher import HttpFetcher
 _DEFAULT_WEAK_THRESHOLD = 100
 _DEFAULT_TIMEOUT = 15
 
-_KNOWN_STATIC_URL = "https://apexfarmersmarket.com/"
-_KNOWN_DYNAMIC_URL = "https://www.heb.com/"
+_KNOWN_STATIC_URL = "https://asrapartners.github.io/farmles_harvester/static/basic/"
+_KNOWN_DYNAMIC_URL = "https://asrapartners.github.io/farmles_harvester/dynamic/nextjs-shell/"
 
 _VERDICT_COLOR = {
     True:  "\033[33mDYNAMIC\033[0m",

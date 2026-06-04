@@ -264,4 +264,4 @@ Do not add complex retry logic or browser automation as part of this runbook.
 
 This runbook is for manual validation only.
 
-Automated tests should continue to use fake fetchers and controlled sample HTML.
+Unit tests should continue to use fake fetchers and controlled sample HTML.
