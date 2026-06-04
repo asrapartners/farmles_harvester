@@ -17,7 +17,8 @@ from farmles_harvester.orchestrator.registry_ingest import (
     ingest_urls,
     ingest_validation_failures,
 )
-from farmles_harvester.pipeline.jsonl import read_jsonl, stream_jsonl
+from farmles_harvester.orchestrator.run_dynamic_pipeline import run_dynamic_pipeline
+from farmles_harvester.pipeline.jsonl import read_jsonl, stream_jsonl, write_jsonl
 from farmles_harvester.pipeline.stage_paths import StagePaths
 from farmles_harvester.pipeline.stage_result import STAGE_STATUS_COMPLETED, StageResult
 from farmles_harvester.registry.url_registry import UrlRegistry
@@ -176,6 +177,22 @@ def run_pipeline(
             ),
         )
         _print_relevance_summary(paths_06.output_path)
+
+        dynamic_candidates = [
+            r for r in read_jsonl(paths_05.output_path)
+            if r.get("render_type") == "dynamic_js"
+        ]
+        dynamic_candidates_path = run_dir / "dynamic_candidates.jsonl"
+        write_jsonl(dynamic_candidates_path, dynamic_candidates)
+        _notify("d01_browser_fetched_pages", "Browser-fetching dynamic pages")
+        dynamic_result = run_dynamic_pipeline(
+            input_path=dynamic_candidates_path,
+            run_dir=run_dir,
+            registry=registry,
+            run_id=run_id,
+        )
+        record_stage_result(manifest, dynamic_result)
+        write_manifest(manifest_path, manifest)
     finally:
         registry.close()
 
