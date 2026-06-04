@@ -172,8 +172,8 @@ class TestRunGenerateMarkdownPages:
     def test_two_different_urls_write_to_separate_paths(self, tmp_path):
         our_vendors_url = f"{SOURCE_URL}our-vendors"
         records = [
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
-            _candidate(our_vendors_url, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page"),
+            _candidate(our_vendors_url, "vendor_page"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
@@ -190,8 +190,8 @@ class TestRunGenerateMarkdownPages:
 
     def test_duplicate_candidate_url_is_fetched_only_once(self, tmp_path):
         records = [
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page"),
+            _candidate(VENDORS_URL, "vendor_page"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
@@ -531,8 +531,8 @@ class TestPagesMetadata:
 
     def test_duplicate_url_appears_once_in_pages(self, tmp_path):
         records = [
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page"),
+            _candidate(VENDORS_URL, "vendor_page"),
         ]
         input_path = _make_input(tmp_path, records)
         paths = _make_paths(tmp_path)
@@ -546,9 +546,9 @@ class TestPagesMetadata:
         source2_slug = "beta-example"
         vendor2_url = f"{source2_url}vendors"
         records = [
-            _candidate(VENDORS_URL, "vendor_page", lead_id="lead_1"),
+            _candidate(VENDORS_URL, "vendor_page"),
             {
-                **_candidate(vendor2_url, "vendor_page", lead_id="lead_2"),
+                **_candidate(vendor2_url, "vendor_page"),
                 "source_url": source2_url,
                 "input_url": "beta.example",
                 "normalized_url": source2_url,
