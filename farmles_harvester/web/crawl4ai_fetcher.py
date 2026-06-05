@@ -39,7 +39,7 @@ class Crawl4AIFetcher:
         browser_config = BrowserConfig(headless=True)
         crawler_config = CrawlerRunConfig(
             page_timeout=60000,
-            wait_for="js:document.body.innerText.length > 500",
+            wait_for="js:() => document.body.innerText.length > 500",
             remove_overlay_elements=True,
             cache_mode=CacheMode.ENABLED if self._use_cache else CacheMode.BYPASS,
             markdown_generator=DefaultMarkdownGenerator(
