@@ -1,5 +1,6 @@
 *.swp
 .obsidian/*
+.venv
 
 # Python
 __pycache__/
@@ -7,6 +8,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.egg-info/
+
+# Venv created in project root (instead of .venv/)
+bin/
+lib/
+lib64
+pyvenv.cfg
 seeds/*
 
 # Generated runs

@@ -64,14 +64,30 @@ def test_full_pipeline_static_fixture(tmp_path):
 
     # At least one page must have been successfully fetched
     fetched = [r for r in records_04 if r.get("fetch_status") == "fetched"]
-    assert fetched, (
-        f"Stage 04 produced no fetched pages. Ensure the fixture subpages are "
-        f"live at {_SEED_URL} (vendors/ and events/)."
-    )
+    if not fetched:
+        from collections import Counter
+        status_counts = Counter(r.get("fetch_status", "missing") for r in records_04)
+        failed_details = []
+        for r in records_04:
+            st = r.get("fetch_status", "missing")
+            url = r.get("candidate_url", "?")
+            if st == "non_html":
+                detail = f"  {st}  http={r.get('http_status')}  type={r.get('content_type')}  {url}"
+            else:
+                detail = f"  {st}  {url}"
+            failed_details.append(detail)
+        s04_counts = manifest["stages"].get("04_generate_markdown_pages", {}).get("counts", {})
+        pytest.fail(
+            f"Stage 04 produced no fetched pages.\n"
+            f"Manifest counts: {s04_counts}\n"
+            f"fetch_status breakdown: {dict(status_counts)}\n"
+            f"Records ({len(records_04)} total):\n"
+            + "\n".join(failed_details or ["  (no records)"])
+        )
 
     # The best page (most words) must contain Greenfield content
     best = max(fetched, key=lambda r: r.get("markdown_word_count", 0))
-    md_path = Path(best["markdown_path"])
+    md_path = run_dir / best["markdown_path"]
     assert md_path.exists(), f"Markdown file not written: {md_path}"
     markdown = md_path.read_text(encoding="utf-8")
     word_count = len(markdown.split())
