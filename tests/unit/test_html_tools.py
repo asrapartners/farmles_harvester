@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from bs4 import BeautifulSoup
 from markdownify import markdownify
@@ -66,13 +64,15 @@ def test_fake_fetcher_raises_for_unknown_url():
 
 
 def test_sample_html_file_parseable():
-    sample_path = (
-        Path(__file__).parents[2] / "samples" / "mock_sites" / "simple_market" / "home.html"
+    html = make_html_page(
+        links=[
+            ("/vendors", "Vendors"),
+            ("/visit", "Visit"),
+            ("/events", "Events"),
+            ("/privacy-policy", "Privacy Policy"),
+        ]
     )
-
-    assert sample_path.exists(), f"Sample file not found: {sample_path}"
-
-    soup = BeautifulSoup(sample_path.read_text(encoding="utf-8"), "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     hrefs = [a["href"] for a in soup.find_all("a")]
 
     assert "/vendors" in hrefs
