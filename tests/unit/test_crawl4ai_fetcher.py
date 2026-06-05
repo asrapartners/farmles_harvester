@@ -6,6 +6,8 @@ import pytest
 
 from farmles_harvester.web.crawl4ai_fetcher import Crawl4AIFetcher
 
+_RICH_MARKDOWN = ("word " * 200).strip()  # 200 words — safely above default threshold
+
 
 def _make_crawl_result(url: str, success: bool, markdown: str = "", error: str = ""):
     cr = MagicMock()
@@ -30,10 +32,13 @@ def _make_records(tmp_path: Path, urls: list[str]) -> list[dict]:
     ]
 
 
-def _mock_sys_modules(crawl_results: list):
+def _mock_sys_modules(crawl_results: list, arun_many_exc: Exception | None = None):
     """Return a sys.modules patch dict that stubs out crawl4ai."""
     mock_crawler = MagicMock()
-    mock_crawler.arun_many = AsyncMock(return_value=crawl_results)
+    if arun_many_exc is not None:
+        mock_crawler.arun_many = AsyncMock(side_effect=arun_many_exc)
+    else:
+        mock_crawler.arun_many = AsyncMock(return_value=crawl_results)
 
     mock_async_cm = MagicMock()
     mock_async_cm.__aenter__ = AsyncMock(return_value=mock_crawler)
@@ -54,7 +59,13 @@ def _mock_sys_modules(crawl_results: list):
 
 @pytest.fixture()
 def fetcher():
-    return Crawl4AIFetcher(max_concurrent=2, use_cache=False)
+    # min_word_count=1 so basic tests aren't affected by threshold logic
+    return Crawl4AIFetcher(max_concurrent=2, use_cache=False, min_word_count=1)
+
+
+@pytest.fixture()
+def strict_fetcher():
+    return Crawl4AIFetcher(max_concurrent=2, use_cache=False, min_word_count=150)
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +97,9 @@ def test_bytes_incr_pcnt_clamped_to_100(tmp_path, fetcher):
     records = _make_records(tmp_path, urls)
     md_path = Path(records[0]["markdown_path"])
     md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text("hi", encoding="utf-8")  # tiny existing file
+    md_path.write_text("hi", encoding="utf-8")
 
-    big_markdown = "word " * 500
-    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=big_markdown)]
+    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=_RICH_MARKDOWN)]
 
     with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
         ok, _ = fetcher.fetch_batch(records)
@@ -104,10 +114,11 @@ def test_bytes_incr_pcnt_partial_improvement(tmp_path, fetcher):
     records = _make_records(tmp_path, urls)
     md_path = Path(records[0]["markdown_path"])
     md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text("a" * 100, encoding="utf-8")
+    existing = "x" * 100
+    md_path.write_text(existing, encoding="utf-8")
 
-    new_markdown = "a" * 150
-    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=new_markdown)]
+    new_content = "x" * 150
+    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=new_content)]
 
     with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
         ok, _ = fetcher.fetch_batch(records)
@@ -118,7 +129,7 @@ def test_bytes_incr_pcnt_partial_improvement(tmp_path, fetcher):
 
 
 # ---------------------------------------------------------------------------
-# failure handling
+# failure handling — per-URL errors
 # ---------------------------------------------------------------------------
 
 def test_failed_fetch_produces_error_record_and_leaves_file_untouched(tmp_path, fetcher):
@@ -128,7 +139,7 @@ def test_failed_fetch_produces_error_record_and_leaves_file_untouched(tmp_path, 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text("original content", encoding="utf-8")
 
-    crawl_results = [_make_crawl_result(urls[0], success=False, error="TimeoutError")]
+    crawl_results = [_make_crawl_result(urls[0], success=False, error="TimeoutError after 60s")]
 
     with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
         ok, errors = fetcher.fetch_batch(records)
@@ -136,15 +147,26 @@ def test_failed_fetch_produces_error_record_and_leaves_file_untouched(tmp_path, 
     assert ok == []
     assert len(errors) == 1
     assert errors[0]["candidate_url"] == urls[0]
-    assert "TimeoutError" in errors[0]["error"]
+    assert errors[0]["fetch_status"] == "timeout"
     assert md_path.read_text() == "original content"
+
+
+def test_non_timeout_failure_has_fetch_error_status(tmp_path, fetcher):
+    urls = ["https://example.com/fail"]
+    records = _make_records(tmp_path, urls)
+    crawl_results = [_make_crawl_result(urls[0], success=False, error="DNS resolution failed")]
+
+    with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
+        _, errors = fetcher.fetch_batch(records)
+
+    assert errors[0]["fetch_status"] == "fetch_error"
 
 
 def test_mixed_results_split_correctly(tmp_path, fetcher):
     urls = ["https://example.com/ok", "https://example.com/fail"]
     records = _make_records(tmp_path, urls)
     crawl_results = [
-        _make_crawl_result(urls[0], success=True, markdown="Good content"),
+        _make_crawl_result(urls[0], success=True, markdown="Good content here for testing purposes"),
         _make_crawl_result(urls[1], success=False, error="404"),
     ]
 
@@ -163,3 +185,58 @@ def test_empty_records_returns_empty_lists(fetcher):
 
     assert ok == []
     assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# thin content
+# ---------------------------------------------------------------------------
+
+def test_thin_content_goes_to_errors_and_leaves_file_untouched(tmp_path, strict_fetcher):
+    urls = ["https://example.com/thin"]
+    records = _make_records(tmp_path, urls)
+    md_path = Path(records[0]["markdown_path"])
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text("original static content", encoding="utf-8")
+
+    thin_markdown = "only a few words here"  # well below 150
+    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=thin_markdown)]
+
+    with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
+        ok, errors = strict_fetcher.fetch_batch(records)
+
+    assert ok == []
+    assert len(errors) == 1
+    assert errors[0]["fetch_status"] == "thin_content"
+    assert errors[0]["word_count"] == 5
+    assert md_path.read_text() == "original static content"
+
+
+def test_content_at_threshold_is_accepted(tmp_path):
+    fetcher = Crawl4AIFetcher(max_concurrent=1, min_word_count=5)
+    urls = ["https://example.com/ok"]
+    records = _make_records(tmp_path, urls)
+    exactly_five = "one two three four five"
+    crawl_results = [_make_crawl_result(urls[0], success=True, markdown=exactly_five)]
+
+    with patch.dict(sys.modules, _mock_sys_modules(crawl_results)):
+        ok, errors = fetcher.fetch_batch(records)
+
+    assert len(ok) == 1
+    assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# arun_many batch exception
+# ---------------------------------------------------------------------------
+
+def test_arun_many_exception_returns_all_as_errors(tmp_path, fetcher):
+    urls = ["https://example.com/a", "https://example.com/b"]
+    records = _make_records(tmp_path, urls)
+
+    with patch.dict(sys.modules, _mock_sys_modules([], arun_many_exc=RuntimeError("browser crashed"))):
+        ok, errors = fetcher.fetch_batch(records)
+
+    assert ok == []
+    assert len(errors) == 2
+    assert all(e["fetch_status"] == "fetch_error" for e in errors)
+    assert all("browser crashed" in e["error"] for e in errors)

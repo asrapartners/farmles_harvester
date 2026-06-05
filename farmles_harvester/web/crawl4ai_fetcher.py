@@ -1,13 +1,21 @@
 import asyncio
 from pathlib import Path
 
+_DEFAULT_MIN_WORD_COUNT = 150
+
 
 class Crawl4AIFetcher:
     """Batch browser-fetcher for JS-rendered pages using crawl4ai."""
 
-    def __init__(self, max_concurrent: int = 5, use_cache: bool = False):
+    def __init__(
+        self,
+        max_concurrent: int = 5,
+        use_cache: bool = False,
+        min_word_count: int = _DEFAULT_MIN_WORD_COUNT,
+    ):
         self._max_concurrent = max_concurrent
         self._use_cache = use_cache
+        self._min_word_count = min_word_count
 
     def fetch_batch(
         self, records: list[dict]
@@ -16,7 +24,8 @@ class Crawl4AIFetcher:
 
         Each record must have: candidate_url, source_slug, markdown_path.
         ok_results follow the d01_browser_fetched_pages schema.
-        error_records have: candidate_url, error.
+        error_records carry fetch_status: "timeout" | "thin_content" | "fetch_error".
+        If the batch call itself throws, all records are returned as error_records.
         """
         return asyncio.run(self._fetch_all(records))
 
@@ -44,20 +53,32 @@ class Crawl4AIFetcher:
         ok_results: list[dict] = []
         error_records: list[dict] = []
 
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            crawl_results = await crawler.arun_many(
-                urls=urls,
-                config=crawler_config,
-                max_concurrent=self._max_concurrent,
-            )
+        try:
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                crawl_results = await crawler.arun_many(
+                    urls=urls,
+                    config=crawler_config,
+                    max_concurrent=self._max_concurrent,
+                )
+        except Exception as exc:
+            for url in urls:
+                error_records.append({
+                    "candidate_url": url,
+                    "fetch_status": "fetch_error",
+                    "error": f"batch call failed: {exc}",
+                })
+            return ok_results, error_records
 
         for cr in crawl_results:
             record = url_to_record[cr.url]
 
             if not cr.success:
+                error_msg = cr.error_message or "unknown error"
+                status = "timeout" if "timeout" in error_msg.lower() else "fetch_error"
                 error_records.append({
                     "candidate_url": cr.url,
-                    "error": cr.error_message or "unknown error",
+                    "fetch_status": status,
+                    "error": error_msg,
                 })
                 continue
 
@@ -66,6 +87,16 @@ class Crawl4AIFetcher:
                 markdown = md_obj.fit_markdown or md_obj.raw_markdown or ""
             else:
                 markdown = str(md_obj) if md_obj else ""
+
+            word_count = len(markdown.split())
+            if word_count < self._min_word_count:
+                error_records.append({
+                    "candidate_url": cr.url,
+                    "fetch_status": "thin_content",
+                    "word_count": word_count,
+                    "error": f"word_count {word_count} < {self._min_word_count}",
+                })
+                continue
 
             md_path = Path(record["markdown_path"])
             bytes_before = md_path.stat().st_size if md_path.exists() else 0
@@ -83,7 +114,7 @@ class Crawl4AIFetcher:
                 "candidate_url": cr.url,
                 "source_slug": record["source_slug"],
                 "markdown_path": record["markdown_path"],
-                "word_count": len(markdown.split()),
+                "word_count": word_count,
                 "overwritten": overwritten,
                 "bytes_before": bytes_before,
                 "bytes_after": bytes_after,

@@ -46,18 +46,28 @@ def run_dynamic_pipeline(
     if fetcher is None:
         fetcher = Crawl4AIFetcher(max_concurrent=max_concurrent, use_cache=use_cache)
 
-    ok_results, error_records = fetcher.fetch_batch(records)
+    try:
+        ok_results, error_records = fetcher.fetch_batch(records)
+    except Exception as exc:
+        print(f"[dynamic] warning: fetch_batch raised unexpectedly: {exc}")
+        ok_results = []
+        error_records = [
+            {"candidate_url": r["candidate_url"], "fetch_status": "fetch_error", "error": str(exc)}
+            for r in records
+        ]
 
     write_jsonl(stage_paths.output_path, ok_results)
     write_jsonl(stage_paths.errors_path, error_records)
 
     completed_at = datetime.now(timezone.utc).isoformat()
 
+    thin_count = sum(1 for r in error_records if r.get("fetch_status") == "thin_content")
     summary = {
         "stage": _STAGE_ID,
         "total": len(records),
         "ok": len(ok_results),
-        "failed": len(error_records),
+        "thin_content": thin_count,
+        "failed": len(error_records) - thin_count,
         "overwritten_count": sum(1 for r in ok_results if r.get("overwritten")),
         "total_bytes_before": sum(r.get("bytes_before", 0) for r in ok_results),
         "total_bytes_after": sum(r.get("bytes_after", 0) for r in ok_results),
@@ -81,7 +91,8 @@ def run_dynamic_pipeline(
         counts={
             "total": len(records),
             "ok": len(ok_results),
-            "failed": len(error_records),
+            "thin_content": thin_count,
+            "failed": len(error_records) - thin_count,
             "overwritten": summary["overwritten_count"],
         },
         started_at=started_at,

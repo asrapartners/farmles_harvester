@@ -25,6 +25,11 @@ class FakeCrawl4AIFetcher:
         return self._ok, self._errors
 
 
+class FakeCrawl4AIFetcherThatRaises:
+    def fetch_batch(self, records: list[dict]) -> tuple[list[dict], list[dict]]:
+        raise RuntimeError("browser crashed")
+
+
 def _candidate(url: str, md_path: str) -> dict:
     return {
         "candidate_url": url,
@@ -189,3 +194,61 @@ def test_missing_input_file_returns_skipped(tmp_path, registry):
         run_id=RUN_ID,
     )
     assert result.status == STAGE_STATUS_SKIPPED
+
+
+# ---------------------------------------------------------------------------
+# reliability — fetch_batch exception recovery
+# ---------------------------------------------------------------------------
+
+def test_fetch_batch_exception_writes_all_as_errors_and_completes(tmp_path, registry):
+    input_path = tmp_path / "dynamic_candidates.jsonl"
+    write_jsonl(input_path, [
+        _candidate(SOURCE_URL_A, str(tmp_path / "wiki/a/index.md")),
+        _candidate(SOURCE_URL_B, str(tmp_path / "wiki/b/index.md")),
+    ])
+
+    result = run_dynamic_pipeline(
+        input_path=input_path,
+        run_dir=tmp_path,
+        registry=registry,
+        run_id=RUN_ID,
+        fetcher=FakeCrawl4AIFetcherThatRaises(),
+    )
+
+    assert result.status == STAGE_STATUS_COMPLETED
+    assert result.counts["ok"] == 0
+    assert result.counts["failed"] == 2
+
+    errors = read_jsonl(tmp_path / "d01_browser_fetched_pages_errors.jsonl")
+    assert len(errors) == 2
+    assert all(e["fetch_status"] == "fetch_error" for e in errors)
+
+
+def test_thin_content_counted_separately_in_summary(tmp_path, registry):
+    import json
+
+    md_a = str(tmp_path / "wiki/source/a/index.md")
+    input_path = tmp_path / "dynamic_candidates.jsonl"
+    write_jsonl(input_path, [_candidate(SOURCE_URL_A, md_a)])
+
+    thin_error = {
+        "candidate_url": SOURCE_URL_A,
+        "fetch_status": "thin_content",
+        "word_count": 10,
+        "error": "word_count 10 < 150",
+    }
+    fake = FakeCrawl4AIFetcher(ok_results=[], error_records=[thin_error])
+
+    result = run_dynamic_pipeline(
+        input_path=input_path,
+        run_dir=tmp_path,
+        registry=registry,
+        run_id=RUN_ID,
+        fetcher=fake,
+    )
+
+    summary = json.loads((tmp_path / "d01_browser_fetched_pages_summary.json").read_text())
+    assert summary["thin_content"] == 1
+    assert summary["failed"] == 0
+    assert result.counts["thin_content"] == 1
+    assert result.counts["failed"] == 0
